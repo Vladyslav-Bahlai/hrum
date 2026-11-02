@@ -9,6 +9,7 @@ import { ActBtn, Btn, Empty, Field, IconBtn, Sheet, useKeyboardHeight } from '..
 import { useToast } from '../ui/Toast';
 import { Chat } from '../types';
 import { AttachSheet, PlusBtn } from './AttachSheet';
+import { ModelChip, ModelSheet } from './Composer';
 import { AskHint, emptyChatHint, Messages, useAskHint } from './ChatSlot';
 import { askHintVisible } from '../chat';
 import { useChat } from './useChat';
@@ -75,6 +76,7 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
   const canSend = (text.trim().length > 0 || photos.length > 0) && !chat.sending;
   const hintOn = view === 'chat' && askHintVisible({ text, focus, photos: photos.length });
   const hint = useAskHint(hintOn);
+  const [modelOpen, setModelOpen] = useState(false);
 
   const hits: ChatHit[] = searchChats(chats, q, now, sh);
   const activeChat = chats.find((c) => c.id === chat.id);
@@ -133,6 +135,7 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
             <IconBtn name="more" label="Действия" size={24} onPress={() => { Keyboard.dismiss(); setActions(chat.id); }} />
           </View>
           <Messages chat={chat} empty={emptyChatHint} />
+          <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 }}><ModelChip onPress={() => { Keyboard.dismiss(); setModelOpen(true); }} /></View>
           {photos.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingBottom: 8 }} style={{ flexGrow: 0 }}>
               {photos.map((p, i) => (
@@ -161,6 +164,7 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
         </>
       )}
 
+      <ModelSheet visible={modelOpen} onClose={() => setModelOpen(false)} />
       <AttachSheet visible={attachOpen} onClose={() => setAttachOpen(false)} tiles={[
         { key: 'camera', label: 'Камера', icon: 'camera', onPress: () => { void add('camera'); } },
         { key: 'gallery', label: 'Галерея', icon: 'image', onPress: () => { void add('gallery'); } },

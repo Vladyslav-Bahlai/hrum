@@ -307,6 +307,19 @@ function ActionDot({ hasInput, sending, sendT, size, onPress, label }: { hasInpu
   );
 }
 
+/** Компактный чип текущей модели: иконка ✦ + имя (с обрезкой); тап — выбор модели. */
+export function ModelChip({ onPress }: { onPress: () => void }) {
+  const { data } = useStore();
+  const model = data.ai.provider === 'claude' ? data.ai.claudeModel : data.ai.geminiModel;
+  return (
+    <Pressable accessibilityLabel="Модель ИИ" onPress={onPress} style={[s.model, s.modelFocus]} hitSlop={6}>
+      <Icon name="sparkle" size={14} color={C.accent} />
+      <Text style={{ color: C.inkSoft, fontSize: 12.5, fontWeight: '600', flexShrink: 1 }} numberOfLines={1} ellipsizeMode="tail">{model || DEFAULT_MODELS[data.ai.provider]}</Text>
+      <Icon name="down" size={12} color={C.muted} />
+    </Pressable>
+  );
+}
+
 /** Смена провайдера и модели прямо из чата; список берётся из кэша последней проверки ключа. */
 export function ModelSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { data, update, cacheModels } = useStore();
