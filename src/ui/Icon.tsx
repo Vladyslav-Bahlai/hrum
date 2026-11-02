@@ -5,7 +5,7 @@ import { C } from '../theme';
 export type IconName =
   | 'plus' | 'camera' | 'image' | 'send' | 'left' | 'right' | 'down' | 'calendar' | 'chart' | 'gear'
   | 'book' | 'star' | 'starFill' | 'trash' | 'close' | 'check' | 'edit' | 'drop' | 'repeat' | 'search'
-  | 'scale' | 'sparkle' | 'copy' | 'pen' | 'list';
+  | 'scale' | 'sparkle' | 'copy' | 'pen' | 'list' | 'expand' | 'up' | 'chat' | 'pin' | 'more';
 
 export function Icon({ name, size = 20, color = C.ink, stroke = 1.7 }: { name: IconName; size?: number; color?: string; stroke?: number }) {
   const p = { stroke: color, strokeWidth: stroke, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -17,6 +17,7 @@ export function Icon({ name, size = 20, color = C.ink, stroke = 1.7 }: { name: I
     case 'send': body = <Path d="M12 19V5M6 11l6-6 6 6" {...p} />; break;
     case 'left': body = <Path d="M15 5l-7 7 7 7" {...p} />; break;
     case 'right': body = <Path d="M9 5l7 7-7 7" {...p} />; break;
+    case 'up': body = <Path d="M6 15l6-6 6 6" {...p} />; break;
     case 'down': body = <Path d="M6 9l6 6 6-6" {...p} />; break;
     case 'calendar': body = <><Rect x="4" y="5.5" width="16" height="14.5" rx="2" {...p} /><Path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" {...p} /></>; break;
     case 'chart': body = <Path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" {...p} />; break;
@@ -34,6 +35,10 @@ export function Icon({ name, size = 20, color = C.ink, stroke = 1.7 }: { name: I
     case 'scale': body = <><Rect x="4" y="4" width="16" height="16" rx="3" {...p} /><Path d="M8.5 9.5a5 5 0 017 0L12 12.5" {...p} /></>; break;
     case 'sparkle': body = <Path d="M12 3.5l1.7 5 5 1.7-5 1.7-1.7 5-1.7-5-5-1.7 5-1.7zM18.5 15.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" {...p} />; break;
     case 'list': body = <><Path d="M9 7h10M9 12h10M9 17h10" {...p} /><Circle cx="5" cy="7" r="1" {...p} /><Circle cx="5" cy="12" r="1" {...p} /><Circle cx="5" cy="17" r="1" {...p} /></>; break;
+    case 'chat': body = <Path d="M5 5.5h14a1.5 1.5 0 011.5 1.5v8a1.5 1.5 0 01-1.5 1.5h-7l-4.5 3.5V16.5H5A1.5 1.5 0 013.5 15V7A1.5 1.5 0 015 5.5z" {...p} />; break;
+    case 'pin': body = <Path d="M9 4h6l-1 5 3 3v1.5H7V12l3-3zM12 13.5V20" {...p} />; break;
+    case 'more': body = <><Circle cx="5.5" cy="12" r="1.4" {...p} fill={color} /><Circle cx="12" cy="12" r="1.4" {...p} fill={color} /><Circle cx="18.5" cy="12" r="1.4" {...p} fill={color} /></>; break;
+    case 'expand': body = <Path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" {...p} />; break;
     case 'copy': body = <><Rect x="8" y="8" width="11" height="11" rx="2" {...p} /><Path d="M5 15V6a1 1 0 011-1h9" {...p} /></>; break;
   }
   return <Svg width={size} height={size} viewBox="0 0 24 24">{body}</Svg>;

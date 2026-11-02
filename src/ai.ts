@@ -71,7 +71,7 @@ const itemProps = {
 // kcal/protein/fat/carbs необязательны: пропуск = «неизвестно»
 const required = ['name', 'emoji', 'grams', 'fiber', 'sugar', 'note', 'section', 'portion'];
 
-const jsonSchema = {
+export const jsonSchema = {
   type: 'object',
   properties: {
     items: { type: 'array', items: { type: 'object', properties: itemProps, required } },
@@ -83,7 +83,7 @@ const jsonSchema = {
 };
 
 // Gemini использует подмножество OpenAPI-схемы с типами в верхнем регистре
-function toGemini(s: any): any {
+export function toGemini(s: any): any {
   if (Array.isArray(s)) return s.map(toGemini);
   if (s && typeof s === 'object') {
     const o: any = {};
@@ -96,15 +96,15 @@ function toGemini(s: any): any {
   return s;
 }
 
-const num = (v: any) => {
+export const num = (v: any) => {
   const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : Number(v);
   return isFinite(n) && n >= 0 ? n : 0;
 };
 
 /** null/пусто/нет поля → «неизвестно», а не 0 */
-const opt = (v: any): number | undefined => (v === undefined || v === null || v === '' ? undefined : num(v));
+export const opt = (v: any): number | undefined => (v === undefined || v === null || v === '' ? undefined : num(v));
 
-function normalize(raw: any): AIResult {
+export function normalize(raw: any): AIResult {
   const items: FoodItem[] = (Array.isArray(raw?.items) ? raw.items : []).map((i: any) => ({
     name: String(i.name || 'Блюдо').slice(0, 80),
     emoji: i.emoji ? String(i.emoji).slice(0, 4) : '🍽️',
@@ -122,13 +122,13 @@ function normalize(raw: any): AIResult {
   return { items, isMenu: !!raw?.isMenu, title: raw?.title ? String(raw.title).slice(0, 40) : undefined, comment: raw?.comment ? String(raw.comment) : undefined };
 }
 
-function extractJson(text: string) {
+export function extractJson(text: string) {
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('ИИ вернул ответ не в формате JSON');
   return JSON.parse(m[0]);
 }
 
-async function readError(res: Response) {
+export async function readError(res: Response) {
   let msg = `HTTP ${res.status}`;
   try {
     const j = await res.json();
@@ -141,7 +141,7 @@ async function readError(res: Response) {
 }
 
 /** Наш собственный тайм-аут: expo-fetch при abort() выдаёт «Fetch request has been canceled». */
-class AITimeout extends Error {}
+export class AITimeout extends Error {}
 const TIMEOUT_MS = 180000; // модели с «размышлением» + фото могут отвечать больше полутора минут
 
 function withTimeout(ms: number) {
@@ -269,19 +269,148 @@ export async function analyzeFood(
 }
 
 /** Обрыв связи, который имеет смысл повторить. */
-function isNetworkHiccup(e: any): boolean {
+export function isNetworkHiccup(e: any): boolean {
   if (e?.name === 'AbortError') return true;
   if (e instanceof TypeError) return true;
   const m = String(e?.message || '').toLowerCase();
   return /cancel|network request failed|timeout|timed out|socket|connection|econnreset|stream|unexpected end/.test(m);
 }
 
-function friendlyError(e: any, hadPhoto: boolean): Error {
+export function friendlyError(e: any, hadPhoto: boolean): Error {
   if (e instanceof AITimeout || !isNetworkHiccup(e)) return e instanceof Error ? e : new Error(String(e?.message || e));
   const tail = hadPhoto
     ? 'Связь оборвалась при отправке фото. Попробуйте ещё раз — лучше по Wi-Fi или сняв меню одним кадром.'
     : 'Связь с ИИ оборвалась. Проверьте интернет и попробуйте ещё раз.';
   return new Error(tail);
+}
+
+// ---------- чат: вопросы к ИИ с контекстом (только чтение, ничего не меняет) ----------
+
+export const CHAT_SYSTEM = `Ты — доброжелательный диетолог-консультант внутри личного дневника питания. Пользователь задаёт вопросы про питание, своё меню, статистику и дневник.
+Правила:
+- Отвечай по-русски, коротко и по делу (обычно до 6–8 строк), без нравоучений; простой текст без таблиц, списки — только если это правда удобнее.
+- Опирайся ТОЛЬКО на данные пользователя ниже. Если данных для ответа не хватает (нет меню, нет записей) — так и скажи и предложи, что добавить. Ничего не выдумывай и не придумывай числа.
+- Ты только советуешь. Ты НЕ можешь ничего записывать, менять или удалять в дневнике и меню — не обещай этого; если пользователь просит записать еду, подскажи, что для этого есть режим «Записать».
+- Если просят совет «что съесть сегодня и когда» — учитывай остаток калорий и БЖУ, время суток, блюда из меню, которые ещё не съедены, и уже съеденное.
+- Не ставь диагнозов и не заменяй врача; при вопросах о здоровье — осторожно, с рекомендацией обратиться к специалисту.`;
+
+export interface ChatTurn { role: 'user' | 'ai'; text: string }
+
+/** Приводит историю к виду, который принимают API: начинается с вопроса пользователя, роли чередуются, последним идёт вопрос. */
+export function toChatTurns(history: ChatTurn[]): ChatTurn[] {
+  const out: ChatTurn[] = [];
+  for (const m of history) {
+    const text = m.text.trim();
+    if (!text) continue;
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) last.text += '\n' + text;
+    else out.push({ role: m.role, text });
+  }
+  while (out.length && out[0].role !== 'user') out.shift();
+  while (out.length && out[out.length - 1].role !== 'user') out.pop();
+  return out;
+}
+
+const CHAT_TIMEOUT_MS = 90000;
+
+/** Вопрос по умолчанию, если фото отправлено без текста. */
+export const DEFAULT_PHOTO_QUESTION = 'Что на фото? Как это вписывается в мой день?';
+
+async function chatClaude(key: string, model: string, system: string, turns: ChatTurn[], images: AIImage[] = []): Promise<string> {
+  const t = withTimeout(CHAT_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal: t.signal,
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1024,
+        system,
+        messages: turns.map((m, i) => ({
+          role: m.role === 'ai' ? 'assistant' : 'user',
+          // фото относятся только к последнему вопросу
+          content: i === turns.length - 1 && images.length
+            ? [...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.base64 } })), { type: 'text', text: m.text }]
+            : m.text,
+        })),
+      }),
+    });
+    if (!res.ok) throw await readError(res);
+    const j = await res.json();
+    const txt = (j.content || []).map((c: any) => c.text || '').join('').trim();
+    if (!txt) throw new Error('Пустой ответ от Claude');
+    return txt;
+  } catch (e) {
+    if (t.fired()) throw timeoutError(t);
+    throw e;
+  } finally {
+    t.done();
+  }
+}
+
+async function chatGemini(key: string, model: string, system: string, turns: ChatTurn[], images: AIImage[] = []): Promise<string> {
+  const t = withTimeout(CHAT_TIMEOUT_MS);
+  const send = (think: boolean) => fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: 'POST',
+      signal: t.signal,
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents: turns.map((m, i) => ({
+          role: m.role === 'ai' ? 'model' : 'user',
+          parts: i === turns.length - 1 && images.length
+            ? [...images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.base64 } })), { text: m.text }]
+            : [{ text: m.text }],
+        })),
+        generationConfig: { temperature: 0.5, ...(think ? { thinkingConfig: { thinkingLevel: 'low' } } : {}) },
+      }),
+    },
+  );
+  try {
+    let res = await send(true);
+    if (!res.ok) {
+      const err = await readError(res);
+      if (res.status === 400 && /think/i.test(err.message)) {
+        res = await send(false);
+        if (!res.ok) throw await readError(res);
+      } else throw err;
+    }
+    const j = await res.json();
+    const txt = (j.candidates?.[0]?.content?.parts || []).filter((p: any) => !p.thought).map((p: any) => p.text || '').join('').trim();
+    if (!txt) throw new Error(j.promptFeedback?.blockReason ? 'Запрос отклонён: ' + j.promptFeedback.blockReason : 'Пустой ответ от Gemini');
+    return txt;
+  } catch (e) {
+    if (t.fired()) throw timeoutError(t);
+    throw e;
+  } finally {
+    t.done();
+  }
+}
+
+/** Ответ ИИ в чате. `history` — последние сообщения (последним должен быть вопрос пользователя), `context` — текст из buildChatContext. */
+export async function chatWithAI(settings: AISettings, key: string, history: ChatTurn[], context: string, images: AIImage[] = []): Promise<string> {
+  if (!key) throw new Error('Добавьте API-ключ в настройках');
+  const turns = toChatTurns(history);
+  if (!turns.length) throw new Error('Напишите вопрос');
+  const system = `${CHAT_SYSTEM}\n\nДАННЫЕ ПОЛЬЗОВАТЕЛЯ (актуальны на момент вопроса):\n${context}`;
+  const run = () => settings.provider === 'claude'
+    ? chatClaude(key, settings.claudeModel || DEFAULT_MODELS.claude, system, turns, images)
+    : chatGemini(key, settings.geminiModel || DEFAULT_MODELS.gemini, system, turns, images);
+  let last: any;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const started = Date.now();
+    try {
+      return await run();
+    } catch (e: any) {
+      last = e;
+      if (e instanceof AITimeout || Date.now() - started > 15000 || !isNetworkHiccup(e) || attempt === 1) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  throw friendlyError(last, images.length > 0);
 }
 
 /** Проверяет ключ и возвращает список доступных моделей. */

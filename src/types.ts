@@ -49,6 +49,8 @@ export interface Menu {
   photo?: string;
   /** отмечено «съедено полностью» — не предлагается для переноса на новые дни */
   done?: boolean;
+  /** блюда, закрытые вручную («съедено полностью» / «не буду») — по названию, без записи в дневник */
+  closed?: string[];
 }
 
 export interface Entry {
@@ -98,6 +100,8 @@ export interface AISettings {
   geminiModel: string;
   /** кэш списка моделей с последней проверки ключа */
   models?: { claude?: string[]; gemini?: string[] };
+  /** любимые модели по провайдерам: только они показываются в выборе модели (если пусто — все) */
+  favModels?: { claude?: string[]; gemini?: string[] };
 }
 
 export interface WeightPoint {
@@ -120,8 +124,61 @@ export interface AppData {
   sounds?: boolean;
   /** событие → имя встроенного звука, 'off' или 'file:<uri>' */
   soundMap?: Record<string, string>;
+  /** общая громкость звуков (по умолчанию «Громко») */
+  soundVolume?: 'low' | 'mid' | 'high';
   /** свои категории дневника */
   meals?: MealDef[];
+  /** чаты с ИИ по дням */
+  chats?: Chat[];
+  chatSettings?: ChatSettings;
+  /** свёрнутые секции интерфейса (например, списки во вкладке «Мои блюда») */
+  collapsed?: string[];
+}
+
+/** Сообщение чата с ИИ. */
+export interface ChatMsg {
+  id: string;
+  role: 'user' | 'ai';
+  text: string;
+  at: number;
+  /** ответ не получен (ошибка/обрыв) */
+  error?: boolean;
+  /** фото к вопросу: ссылки на локальные копии (не base64), только для чата — в дневник не пишутся */
+  photos?: string[];
+}
+
+/** Один чат = один «день» (граница дня сдвинута, по умолчанию 04:00). */
+export interface Chat {
+  /** ключ дня YYYY-MM-DD (чат дня) или c_… (чат, созданный вручную во вкладке «Чаты») */
+  id: string;
+  /** своё название (переименованный чат) */
+  title?: string;
+  /** закреплённый чат: сверху списка, не удаляется автоочисткой */
+  pinned?: boolean;
+  messages: ChatMsg[];
+  updatedAt: number;
+}
+
+/** Что отдавать ИИ в чате вместе с вопросом. */
+export interface ChatContextOpts {
+  today: boolean;
+  menu: boolean;
+  profile: boolean;
+  favorites: boolean;
+  /** итоги последних N дней (без списка блюд), 0 — выключено */
+  summaryDays: number;
+  /** подробно блюда за последние M дней (кроме сегодняшнего), 0 — выключено */
+  detailDays: number;
+  /** сколько последних сообщений чата отправлять */
+  history: number;
+}
+
+export interface ChatSettings {
+  ctx: ChatContextOpts;
+  /** хранить чаты столько дней; 0 — всегда */
+  keepDays: number;
+  /** час, с которого начинается новый чат (0–11) */
+  dayStartHour: number;
 }
 
 export interface AIResult {

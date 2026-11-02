@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { play } from '../sound';
 import { C, T } from '../theme';
 import { Icon } from '../ui/Icon';
@@ -10,13 +10,13 @@ import { analyzeFood } from '../ai';
 import { getKey, persistPhoto } from '../storage';
 import { fromCamera, fromGallery, Picked } from '../media';
 import { FoodItem, Menu } from '../types';
-import { fmt, humanDate, kcalOf, kcalText, known, macroText, menuTitleFor, plural, PORTIONS, r0, r1, sum, uid } from '../utils';
+import { dishState, eatenByName, fmt, humanDate, isClosed, kcalOf, kcalText, known, macroText, menuTitleFor, plural, r0, restItems, sum, uid } from '../utils';
 import { useToast } from '../ui/Toast';
 import { Tabs } from '../ui/kit';
 import { DishesView, DishPicker } from './Dishes';
 
 /** Вкладка «Меню»: сохранённые меню, добавление блюда в дневник одним тапом. */
-export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish }: {
+export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish, noSwipe }: {
   date: string;
   /** отступ снизу для плавающей панели инструментов */
   bottom: number;
@@ -28,6 +28,8 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
   onAdd: (item: FoodItem, portion: number, menu: Menu) => void;
   onAddAll: (items: FoodItem[], menu: Menu) => void;
   onAddDish: (item: FoodItem) => void;
+  /** сообщает родителю зону (в координатах окна), где свайп по дню отключён */
+  noSwipe?: (zone: { y: number; h: number } | null) => void;
 }) {
   const store = useStore();
   const [view, setView] = useState<'menu' | 'dishes'>('menu');
@@ -57,15 +59,19 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
 
   const menu = menus.find((m) => m.id === sel);
 
-  // сколько раз блюдо уже отмечено в выбранный день
-  const eaten = useMemo(() => {
-    const map: Record<string, number> = {};
-    if (!menu) return map;
-    for (const e of store.data.entries) {
-      if (e.date === date && e.menuId === menu.id) map[e.item.name] = (map[e.item.name] || 0) + e.portion;
-    }
-    return map;
-  }, [store.data.entries, date, menu]);
+  // сколько порций каждого блюда уже отмечено в выбранный день
+  const eaten = useMemo(() => (menu ? eatenByName(store.data.entries, date, menu.id) : {}), [store.data.entries, date, menu]);
+
+  // горизонтальный список меню не должен листать день (на iPhone родительский жест перехватывает прокрутку)
+  const pillsRef = useRef<any>(null);
+  const measurePills = () => {
+    pillsRef.current?.measureInWindow((_x: number, y: number, _w: number, h: number) => noSwipe?.(h > 0 ? { y, h } : null));
+  };
+  const showPills = view === 'menu' && menus.length > 1;
+  useEffect(() => {
+    if (!showPills) noSwipe?.(null);
+    return () => noSwipe?.(null);
+  }, [showPills]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sections = useMemo(() => {
     const out: { title: string; items: FoodItem[] }[] = [];
@@ -102,7 +108,8 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
 
       {view === 'dishes' ? <DishesView onAdd={onAddDish} /> : null}
 
-      {view === 'menu' && menus.length > 1 ? (
+      {showPills ? (
+        <View ref={pillsRef} collapsable={false} onLayout={measurePills} onTouchStart={measurePills} style={{ flexGrow: 0, flexShrink: 0 }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 0 }}
           contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingTop: 12, alignItems: 'center' }}>
           {menus.map((m) => {
@@ -115,6 +122,7 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
             );
           })}
         </ScrollView>
+        </View>
       ) : null}
 
       {view !== 'menu' ? null : !menu ? (
@@ -160,33 +168,35 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
                 ) : null}
                 {sec.items.map((it, i) => {
                   const n = eaten[it.name] || 0;
+                  const closed = isClosed(menu, it.name);
+                  const ds = dishState(n, closed);
                   return (
                     <Pressable key={i} onLongPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} delayLongPress={300}
-                      onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} style={({ pressed }) => [st.dish, pressed && { opacity: 0.7 }]}>
-                      <View style={[st.num, n ? { backgroundColor: C.accent, borderColor: C.accent } : null]}>
-                        <Text style={[st.numT, n ? { color: C.white } : null]}>{menu.items.indexOf(it) + 1}</Text>
+                      onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} style={({ pressed }) => [st.dish, closed && { opacity: 0.55 }, pressed && { opacity: 0.7 }]}>
+                      <View style={[st.num, n || closed ? { backgroundColor: C.accent, borderColor: C.accent } : null]}>
+                        <Text style={[st.numT, n || closed ? { color: C.white } : null]}>{menu.items.indexOf(it) + 1}</Text>
                       </View>
                       <View style={{ flex: 1, paddingRight: 10 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                          <Text style={[T.h3, { flex: 1 }]}>{it.name}</Text>
+                          <Text style={[T.h3, { flex: 1 }, closed && { textDecorationLine: 'line-through' }]}>{it.name}</Text>
                           <Text style={[T.body, T.num, { fontWeight: '700', marginLeft: 8 }, !known(it).kcal && { color: C.muted }]}>{known(it).kcal ? fmt(it.kcal!) : '—'}</Text>
                         </View>
                         <Text style={[T.small, { marginTop: 3 }]}>
                           {it.grams ? `${r0(it.grams)} г · ` : ''}{macroText(it, 1, true)}
                         </Text>
                         {it.note ? <Text style={[T.small, { color: C.inkSoft, marginTop: 2 }]} numberOfLines={2}>{it.note}</Text> : null}
-                        {n ? (
-                          <View style={st.eaten}>
-                            <Icon name="check" size={13} color={C.accent} stroke={2.6} />
-                            <Text style={{ color: C.accent, fontSize: 12.5, fontWeight: '700' }}>
-                              съедено {PORTIONS.find((p) => Math.abs(p.v - n) < 0.01)?.label ?? r1(n)}
+                        {ds.kind !== 'none' ? (
+                          <View style={[st.eaten, ds.kind === 'part' && st.rest, ds.kind === 'closed' && st.closedTag]}>
+                            <Icon name="check" size={13} color={ds.kind === 'part' ? C.fat : ds.kind === 'closed' ? C.muted : C.accent} stroke={2.6} />
+                            <Text style={{ color: ds.kind === 'part' ? '#8A6A1F' : ds.kind === 'closed' ? C.muted : C.accent, fontSize: 12.5, fontWeight: '700' }}>
+                              {ds.label}
                             </Text>
                           </View>
                         ) : null}
                       </View>
                       <Pressable onPress={() => add(it, 1)} onLongPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} hitSlop={6}
-                        style={({ pressed }) => [st.plus, n ? { backgroundColor: C.accentSoft } : null, pressed && { transform: [{ scale: 0.92 }] }]}>
-                        <Icon name="plus" size={24} color={n ? C.accent : C.white} stroke={2.4} />
+                        style={({ pressed }) => [st.plus, n || closed ? { backgroundColor: C.accentSoft } : null, pressed && { transform: [{ scale: 0.92 }] }]}>
+                        <Icon name="plus" size={24} color={n || closed ? C.accent : C.white} stroke={2.4} />
                       </Pressable>
                     </Pressable>
                   );
@@ -194,9 +204,9 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
               </View>
             ))}
             {(() => {
-              const rest = menu.items.filter((it) => !eaten[it.name]);
+              const rest = restItems(menu, eaten);
               return rest.length ? (
-                <Btn label={rest.length === menu.items.length ? `Съел всё меню · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал` : `Отметить остальное (${rest.length}) · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал`}
+                <Btn label={rest.length === menu.items.length && !menu.closed?.length ? `Съел всё меню · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал` : `Отметить остальное (${rest.length}) · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал`}
                   kind="soft" icon="check" onPress={() => onAddAll(rest, menu)} style={{ marginTop: 18 }} />
               ) : (
                 <Text style={[T.body, { textAlign: 'center', marginTop: 18, color: C.accent, fontWeight: '600' }]}>Всё меню отмечено ✓</Text>
@@ -214,6 +224,13 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
             <View style={{ gap: 8, paddingBottom: 4 }}>
               <Btn label={`Добавить · ${kcalText(portionFor.item, amount)}`} onPress={() => { add(portionFor.item, amount); setPortionFor(null); }}
                 style={{ paddingVertical: 16 }} disabled={amount <= 0} />
+              <ActBtn label={isClosed(menu, portionFor.item.name) ? 'Снять закрытие блюда' : 'Закрыть блюдо'} icon="check" style={{ flex: 0, minHeight: 50 }}
+                onPress={() => {
+                  const name = portionFor.item.name; const was = isClosed(menu, name);
+                  store.setDishClosed(menu.id, name, !was);
+                  setPortionFor(null);
+                  toast({ text: was ? `«${name}» снова в меню` : `«${name}» закрыто — в дневник не попадёт`, action: 'Отменить', onAction: () => store.setDishClosed(menu.id, name, was) });
+                }} />
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <ActBtn label="Заменить" icon="repeat" onPress={() => { setReplace({ index: portionFor.index }); setPortionFor(null); }} />
                 <ActBtn label="Изменить" icon="edit" onPress={() => { setEditIndex(portionFor.index); setEdit(menu); setPortionFor(null); }} />
@@ -230,6 +247,7 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
               </View>
             </View>
           }>
+          {(() => { const ds = dishState(eaten[portionFor.item.name] || 0, isClosed(menu, portionFor.item.name)); return ds.kind !== 'none' ? <Text style={[T.small, { marginBottom: 6, color: C.accent, fontWeight: '700' }]}>{ds.label}</Text> : null; })()}
           <Text style={[T.small, { marginBottom: 12 }]}>
             Полная порция: {kcalText(portionFor.item)}{portionFor.item.grams ? ` · ${r0(portionFor.item.grams)} г` : ''} · {macroText(portionFor.item)}
           </Text>
@@ -253,14 +271,7 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
         onUpload={() => setCreate(true)} onManual={() => setEdit(blankMenu(date))} onPast={() => setPickOld(true)}
         onEdit={() => menu && setEdit(menu)}
         onDone={() => { if (!menu) return; const v = !menu.done; store.setMenuDone(menu.id, v); toast({ text: v ? 'Меню отмечено съеденным' : 'Меню снова в списке переноса', action: 'Отменить', onAction: () => store.setMenuDone(menu.id, !v) }); }}
-        onDetach={() => { if (!menu) return; store.detachMenu(menu.id, date); toast({ text: 'Меню убрано из этого дня', action: 'Вернуть', onAction: () => store.attachMenu(menu.id, date) }); }}
-        onDelete={() => {
-          if (!menu) return;
-          Alert.alert('Удалить меню совсем?', `«${menu.title}» исчезнет со всех дней. Записи в дневнике останутся.`, [
-            { text: 'Отмена', style: 'cancel' },
-            { text: 'Удалить', style: 'destructive', onPress: () => store.deleteMenu(menu.id) },
-          ]);
-        }} />
+        onDetach={() => { if (!menu) return; store.detachMenu(menu.id, date); toast({ text: 'Меню убрано из этого дня', action: 'Вернуть', onAction: () => store.attachMenu(menu.id, date) }); }} />
       <MenuCreateSheet visible={create} date={date} onClose={() => setCreate(false)} onParsed={(m) => { setCreate(false); setEdit(m); }}
         onMany={(list) => { setCreate(false); list.forEach((m) => store.saveMenu(m)); setSel(list[0]?.id); toast({ text: `Создано меню: ${list.length}` }); }}
         onManual={() => { setCreate(false); setEdit(blankMenu(date)); }} />
@@ -504,6 +515,8 @@ const st = StyleSheet.create({
   dish: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   dots: { flex: 1, minWidth: 12, marginHorizontal: 6, borderBottomWidth: 1, borderStyle: 'dotted', borderColor: C.lineStrong, marginBottom: 4 },
   plus: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+  rest: { backgroundColor: '#F7EFD9' },
+  closedTag: { backgroundColor: C.line },
   eaten: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 6, backgroundColor: C.accentSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   pBig: { width: '31%', flexGrow: 1, height: 76, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong },
   bigPick: { flex: 1, height: 84, borderRadius: 14, backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, alignItems: 'center', justifyContent: 'center', gap: 6 },
@@ -519,6 +532,7 @@ const st = StyleSheet.create({
     marginHorizontal: 12, backgroundColor: C.surface, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong,
     shadowColor: '#0F2A1C', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
+  mainBtn: { flex: 1, flexDirection: 'row', gap: 8, height: 52 },
   tool: { height: 54, paddingHorizontal: 4, borderRadius: 18, backgroundColor: C.accentTint, alignItems: 'center', justifyContent: 'center' },
   take: { backgroundColor: C.accentSoft, paddingHorizontal: 14, height: 40, borderRadius: 20, justifyContent: 'center' },
   secBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 46, paddingHorizontal: 14, borderRadius: 23, backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
@@ -573,35 +587,65 @@ function PastMenus({ date, limit, onTaken, onAll, showAll }: { date: string; lim
   );
 }
 
-/** Плавающая панель инструментов меню (вместо поля «Что вы съели?»). */
-function MenuToolbar({ bottom, hidden, menu, onUpload, onManual, onPast, onEdit, onDone, onDetach, onDelete }: {
+/** Плавающая панель меню: один ряд «Добавить / Изменить»; по тапу сверху раскрывается ряд опций. Тап по главной кнопке или по пустому месту сворачивает. */
+function MenuToolbar({ bottom, hidden, menu, onUpload, onManual, onPast, onEdit, onDone, onDetach }: {
   bottom: number; hidden: boolean; menu?: Menu; onUpload: () => void; onManual: () => void; onPast: () => void;
-  onEdit: () => void; onDone: () => void; onDetach: () => void; onDelete: () => void;
+  onEdit: () => void; onDone: () => void; onDetach: () => void;
 }) {
+  const [open, setOpen] = useState<null | 'add' | 'edit'>(null);
+  const pop = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    pop.setValue(0);
+    if (open) Animated.timing(pop, { toValue: 1, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [open, pop]);
+  // меню исчезло или вкладка скрыта — опции сворачиваем
+  useEffect(() => { if (hidden || (!menu && open === 'edit')) setOpen(null); }, [hidden, menu, open]);
   if (hidden) return null;
-  const Tool = ({ icon, label, on, danger, flex = 1, iconOnly }: { icon: any; label: string; on: () => void; danger?: boolean; flex?: number; iconOnly?: boolean }) => (
-    <Pressable onPress={on} accessibilityLabel={label} style={({ pressed }) => [st.tool, { flex }, danger && { backgroundColor: C.overSoft }, pressed && { opacity: 0.6 }]}>
-      <Icon name={icon} size={21} color={danger ? C.over : C.accent} />
-      {iconOnly ? null : <Text style={{ fontSize: 11.5, fontWeight: '600', marginTop: 2, color: danger ? C.over : C.accent, textAlign: 'center' }} numberOfLines={2}>{label}</Text>}
+  const run = (fn: () => void) => () => { setOpen(null); fn(); };
+  const Tool = ({ icon, label, on, flex = 1 }: { icon: any; label: string; on: () => void; flex?: number }) => (
+    <Pressable onPress={on} accessibilityLabel={label} style={({ pressed }) => [st.tool, { flex }, pressed && { opacity: 0.6 }]}>
+      <Icon name={icon} size={21} color={C.accent} />
+      <Text style={{ fontSize: 11.5, fontWeight: '600', marginTop: 2, color: C.accent, textAlign: 'center' }} numberOfLines={2}>{label}</Text>
     </Pressable>
   );
+  const Main = ({ k, icon, label }: { k: 'add' | 'edit'; icon: any; label: string }) => {
+    const on = open === k;
+    return (
+      <Pressable onPress={() => setOpen(on ? null : k)} accessibilityLabel={label}
+        style={({ pressed }) => [st.tool, st.mainBtn, on && { backgroundColor: C.accent }, pressed && { opacity: 0.7 }]}>
+        <Icon name={icon} size={21} color={on ? C.white : C.accent} stroke={on ? 2.2 : 1.7} />
+        <Text style={{ fontSize: 15, fontWeight: '700', color: on ? C.white : C.accent }}>{label}</Text>
+      </Pressable>
+    );
+  };
   return (
-    <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom }}>
-      <View style={[st.toolbar, { padding: 6, gap: 6 }]}>
-        <View style={{ flexDirection: 'row', gap: 6 }}>
-          <Tool icon="camera" label="Загрузить" on={onUpload} />
-          <Tool icon="pen" label="Вручную" on={onManual} />
-          <Tool icon="calendar" label="Из прошлых" on={onPast} />
-        </View>
-        {menu ? (
+    <>
+      {open ? <Pressable accessibilityLabel="Свернуть" onPress={() => setOpen(null)} style={StyleSheet.absoluteFill} /> : null}
+      <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom }}>
+        <View style={[st.toolbar, { padding: 6, gap: 6 }]}>
+          {open ? (
+            <Animated.View style={{ flexDirection: 'row', gap: 6, opacity: pop, transform: [{ translateY: pop.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }}>
+              {open === 'add' ? (
+                <>
+                  <Tool icon="camera" label="Загрузить" on={run(onUpload)} />
+                  <Tool icon="pen" label="Вручную" on={run(onManual)} />
+                  <Tool icon="calendar" label="Из прошлых" on={run(onPast)} />
+                </>
+              ) : menu ? (
+                <>
+                  <Tool icon="close" label="Убрать из дня" on={run(onDetach)} />
+                  <Tool icon="edit" label="Изменить меню" on={run(onEdit)} />
+                  <Tool icon="check" label={menu.done ? 'Вернуть в список' : 'Съедено полностью'} on={run(onDone)} />
+                </>
+              ) : null}
+            </Animated.View>
+          ) : null}
           <View style={{ flexDirection: 'row', gap: 6 }}>
-            <Tool icon="edit" label="Изменить" on={onEdit} />
-            <Tool icon="check" label={menu.done ? 'Вернуть в список' : 'Съедено полностью'} on={onDone} flex={1.5} />
-            <Tool icon="close" label="Убрать из дня" on={onDetach} />
-            <Tool icon="trash" label="Удалить меню" on={onDelete} danger iconOnly flex={0.6} />
+            <Main k="add" icon="plus" label="Добавить" />
+            {menu ? <Main k="edit" icon="edit" label="Изменить" /> : null}
           </View>
-        ) : null}
+        </View>
       </View>
-    </View>
+    </>
   );
 }

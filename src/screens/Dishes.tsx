@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, LayoutAnimation, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { play } from '../sound';
 import { C, T } from '../theme';
 import { Icon } from '../ui/Icon';
@@ -10,6 +10,7 @@ import { analyzeFood } from '../ai';
 import { getKey } from '../storage';
 import { fromCamera, fromGallery } from '../media';
 import { FoodItem } from '../types';
+import { isCollapsed } from '../logic';
 import { kcalText, macroText, r0 } from '../utils';
 
 function SearchBox({ value, onChange, autoFocus }: { value: string; onChange: (s: string) => void; autoFocus?: boolean }) {
@@ -156,10 +157,14 @@ export function DishesView({ onAdd }: { onAdd: (item: FoodItem) => void }) {
   const list = searchLibrary(lib, q);
   const presets = list.filter((l) => l.presetId);
   const rest = list.filter((l) => !l.presetId);
-  const sections: ({ h: string } | LibItem)[] = [
-    ...(presets.length ? [{ h: `Мои блюда · ${presets.length}` }, ...presets] : []),
-    ...(rest.length ? [{ h: 'Из меню и дневника' }, ...rest.slice(0, 150)] : []),
+  // секции сворачиваются тапом по заголовку; состояние запоминается. При поиске всё раскрыто, чтобы ничего не терялось
+  const cPre = !q && isCollapsed(data, 'dishes:presets');
+  const cRest = !q && isCollapsed(data, 'dishes:rest');
+  const sections: ({ h: string; key: string; closed: boolean } | LibItem)[] = [
+    ...(presets.length ? [{ h: `Мои блюда · ${presets.length}`, key: 'dishes:presets', closed: cPre }, ...(cPre ? [] : presets)] : []),
+    ...(rest.length ? [{ h: 'Из меню и дневника', key: 'dishes:rest', closed: cRest }, ...(cRest ? [] : rest.slice(0, 150))] : []),
   ];
+  const toggle = (key: string) => { LayoutAnimation.configureNext(LayoutAnimation.create(170, 'easeInEaseOut', 'opacity')); store.toggleCollapsed(key); };
 
   return (
     <View style={{ flex: 1 }}>
@@ -184,7 +189,10 @@ export function DishesView({ onAdd }: { onAdd: (item: FoodItem) => void }) {
         }
         renderItem={({ item: x }) =>
           'h' in x ? (
-            <Text style={[T.label, { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 6 }]}>{x.h}</Text>
+            <Pressable accessibilityLabel={x.h} onPress={() => { if (!q) toggle(x.key); }} style={st.head}>
+              <Text style={[T.label, { flex: 1 }]}>{x.h}</Text>
+              {!q ? <Icon name={x.closed ? 'right' : 'down'} size={20} color={C.muted} /> : null}
+            </Pressable>
           ) : (
             <LibRow l={x} onPress={() => setEditor({ item: x.item, id: x.presetId })}
               right={
@@ -209,6 +217,7 @@ export function DishesView({ onAdd }: { onAdd: (item: FoodItem) => void }) {
 
 const st = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 12, paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, minHeight: 52, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, minHeight: 60 },
   plus: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
   newBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },

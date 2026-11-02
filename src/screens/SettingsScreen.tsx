@@ -10,7 +10,9 @@ import { DEFAULT_MODELS, listModels, pickModel } from '../ai';
 import { getKey, importSound, readTextFile, setKey, storagePath, writeBackup } from '../storage';
 import { MealDef, Profile, Provider } from '../types';
 import { ACTIVITY, calcTargets, DEFAULT_MEALS, kcalText, minutesLabel, uid } from '../utils';
-import { dropPlayer, EVENTS, preview, SOUND_NAMES } from '../sound';
+import { buildChatContext, chatSettings, CTX_PRESETS, estimateTokens, KEEP_OPTIONS, sameCtx, tokensLabel } from '../chat';
+import { ChatContextOpts } from '../types';
+import { dropPlayer, EVENTS, preview, SOUND_NAMES, VOLUMES, setSoundVolume } from '../sound';
 
 export function AISection() {
   const { data, update } = useStore();
@@ -25,7 +27,7 @@ export function AISection() {
 }
 
 function KeyForm({ provider }: { provider: 'claude' | 'gemini' }) {
-  const { data, update, cacheModels } = useStore();
+  const { data, update, cacheModels, toggleFavModel } = useStore();
   const [key, setK] = useState('');
   const [saved, setSaved] = useState('');
   const models = data.ai.models?.[provider] || [];
@@ -82,6 +84,22 @@ function KeyForm({ provider }: { provider: 'claude' | 'gemini' }) {
         ))}
       </View>
       {!models.length ? <Text style={[T.small, { marginTop: 6 }]}>Нажмите «Проверить и сохранить», чтобы загрузить список доступных моделей — он запоминается, и модель можно менять прямо в чате.</Text> : null}
+
+      {models.length ? (
+        <View style={{ marginTop: 16 }}>
+          <Text style={[T.small, { marginBottom: 4 }]}>Любимые модели</Text>
+          <Text style={[T.small, { marginBottom: 8, lineHeight: 18 }]}>Отмеченные звёздочкой показываются в дневнике при выборе модели. Если не отмечено ничего — показываются все.</Text>
+          {models.map((m) => {
+            const on = !!data.ai.favModels?.[provider]?.includes(m);
+            return (
+              <Pressable key={m} accessibilityLabel={`Любимая модель ${m}`} onPress={() => toggleFavModel(provider, m)} style={({ pressed }) => [fav.row, on && { backgroundColor: C.accentTint }, pressed && { opacity: 0.7 }]}>
+                <Text style={[T.body, { flex: 1, fontSize: 14 }]} numberOfLines={1}>{m}</Text>
+                <Icon name={on ? 'starFill' : 'star'} size={26} color={on ? C.fat : C.muted} />
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -201,7 +219,10 @@ function SoundSection() {
     <View style={{ gap: 12 }}>
       <Seg items={[{ key: 'on', label: 'Включены' }, { key: 'off', label: 'Выключены' }]} value={on ? 'on' : 'off'}
         onChange={(k) => update((d) => ({ ...d, sounds: k === 'on' }))} />
-      <Text style={T.small}>Тихие звуки природы вместо вибрации. Для каждого события можно выбрать свой звук, отключить его или взять свой файл (mp3, wav, m4a). В беззвучном режиме телефона звуки молчат.</Text>
+      <Text style={T.small}>Мягкие звуки природы вместо вибрации. Для каждого события можно выбрать свой звук, отключить его или взять свой файл (mp3, wav, m4a). Звуки слышны и при включённом беззвучном режиме — выключите их здесь, если мешают.</Text>
+      <Text style={T.label}>Громкость</Text>
+      <Seg items={VOLUMES.map((v) => ({ key: v.key, label: v.label }))} value={data.soundVolume || 'high'}
+        onChange={(k) => { update((d) => ({ ...d, soundVolume: k })); setSoundVolume(k); preview('drop'); }} />
       {EVENTS.map((e) => {
         const c = choice(e.key, e.def);
         const isOpen = open === e.key;
@@ -226,6 +247,74 @@ function SoundSection() {
         );
       })}
       <ActBtn label="Вернуть звуки по умолчанию" icon="check" onPress={() => setSoundMap({})} style={{ flex: 0 }} />
+    </View>
+  );
+}
+
+/** Крупный степпер «− число +». */
+function Stepper({ label, hint, value, min, max, onChange, fmtV }: { label: string; hint?: string; value: number; min: number; max: number; onChange: (n: number) => void; fmtV?: (n: number) => string }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 6 }}>
+      <View style={{ flex: 1, paddingRight: 8 }}>
+        <Text style={T.body}>{label}</Text>
+        {hint ? <Text style={T.small}>{hint}</Text> : null}
+      </View>
+      <Pressable accessibilityLabel="Меньше" onPress={() => onChange(Math.max(min, value - 1))} style={[st.step, value <= min && { opacity: 0.4 }]}><Text style={st.stepT}>−</Text></Pressable>
+      <Text style={[T.h3, { minWidth: 44, textAlign: 'center' }]}>{fmtV ? fmtV(value) : value}</Text>
+      <Pressable accessibilityLabel="Больше" onPress={() => onChange(Math.min(max, value + 1))} style={[st.step, value >= max && { opacity: 0.4 }]}><Text style={st.stepT}>+</Text></Pressable>
+    </View>
+  );
+}
+
+function ToggleRow({ label, hint, on, onChange }: { label: string; hint?: string; on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <Pressable onPress={() => onChange(!on)} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 6 }}>
+      <View style={{ flex: 1, paddingRight: 8 }}>
+        <Text style={T.body}>{label}</Text>
+        {hint ? <Text style={T.small}>{hint}</Text> : null}
+      </View>
+      <View style={[st.sw, on && { backgroundColor: C.accent, borderColor: C.accent }]}>
+        <Text style={{ color: on ? C.white : C.muted, fontWeight: '700', fontSize: 14 }}>{on ? 'Да' : 'Нет'}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function ChatSection() {
+  const { data, setChatSettings, clearChats } = useStore();
+  const cs = chatSettings(data);
+  const ctx = cs.ctx;
+  const setCtx = (patch: Partial<ChatContextOpts>) => setChatSettings({ ...cs, ctx: { ...ctx, ...patch } });
+  const tokens = estimateTokens(buildChatContext(data, new Date(), ctx));
+  const count = data.chats?.length || 0;
+  return (
+    <View style={{ gap: 12 }}>
+      <Text style={T.small}>В режиме «Спросить» (кнопка «+» в дневнике) ИИ отвечает с учётом ваших данных. Здесь выбирается, какие данные он видит. Он только читает и ничего не меняет в приложении. Режим «Записать» контекст не отправляет.</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {CTX_PRESETS.map((p) => <Chip key={p.key} label={p.label} on={sameCtx(ctx, p.ctx)} onPress={() => setCtx(p.ctx)} />)}
+      </View>
+      <Text style={[T.small, { color: C.accent, fontWeight: '600' }]}>Размер контекста: {tokensLabel(tokens)} на вопрос (без истории чата)</Text>
+      <ToggleRow label="Дневник за сегодня" hint="блюда, время, итоги, вода" on={ctx.today} onChange={(v) => setCtx({ today: v })} />
+      <ToggleRow label="Меню дня с остатками" hint="что съедено, что осталось" on={ctx.menu} onChange={(v) => setCtx({ menu: v })} />
+      <ToggleRow label="Цели и профиль" hint="норма калорий и БЖУ, цель" on={ctx.profile} onChange={(v) => setCtx({ profile: v })} />
+      <ToggleRow label="Избранные блюда" hint="блюда со звездой" on={ctx.favorites} onChange={(v) => setCtx({ favorites: v })} />
+      <Stepper label="Итоги прошлых дней" hint="по дням, без списка блюд" value={ctx.summaryDays} min={0} max={30} onChange={(n) => setCtx({ summaryDays: n })} fmtV={(n) => (n ? `${n} дн.` : 'выкл')} />
+      <Stepper label="Блюда прошлых дней" hint="подробный список за последние дни" value={ctx.detailDays} min={0} max={14} onChange={(n) => setCtx({ detailDays: n })} fmtV={(n) => (n ? `${n} дн.` : 'выкл')} />
+      <Stepper label="Память чата" hint="сколько прошлых сообщений отправлять" value={ctx.history} min={0} max={60} onChange={(n) => setCtx({ history: n })} fmtV={(n) => (n ? String(n) : '0')} />
+      <Stepper label="Новый чат начинается в" hint="до этого времени вопросы идут во вчерашний чат" value={cs.dayStartHour} min={0} max={11} onChange={(n) => setChatSettings({ ...cs, dayStartHour: n })} fmtV={(n) => `${String(n).padStart(2, '0')}:00`} />
+      <Text style={T.label}>Хранить чаты</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {KEEP_OPTIONS.map((o) => <Chip key={o.v} label={o.label} on={cs.keepDays === o.v} onPress={() => setChatSettings({ ...cs, keepDays: o.v })} />)}
+      </View>
+      <Text style={T.small}>Старые чаты удаляются при запуске приложения. Сегодняшний чат остаётся всегда.</Text>
+      <ActBtn label={count ? `Очистить все чаты (${count})` : 'Чатов пока нет'} icon="trash" danger onPress={() => {
+        if (!count) return;
+        Alert.alert('Очистить все чаты?', 'Вся переписка с ИИ будет удалена. Дневник и меню не затрагиваются.', [
+          { text: 'Отмена', style: 'cancel' },
+          { text: 'Очистить', style: 'destructive', onPress: clearChats },
+        ]);
+      }} style={{ flex: 0, opacity: count ? 1 : 0.5 }} />
+      <ActBtn label="Вернуть настройки чата по умолчанию" icon="check" onPress={() => setChatSettings(chatSettings({}))} style={{ flex: 0 }} />
     </View>
   );
 }
@@ -273,6 +362,7 @@ function FavSection() {
 
 const SECTIONS = [
   { key: 'ai', title: 'Искусственный интеллект', C: AISection },
+  { key: 'chat', title: 'Чат с ИИ', C: ChatSection },
   { key: 'targets', title: 'Дневная норма', C: TargetsSection },
   { key: 'profile', title: 'Рассчитать норму', C: ProfileSection },
   { key: 'meals', title: 'Категории дневника', C: MealsSection },
@@ -303,7 +393,7 @@ export function SettingsScreen() {
         );
       })}
       <Hair />
-      <Text style={[T.small, { marginTop: 14 }]}>Хрум · версия 1.2</Text>
+      <Text style={[T.small, { marginTop: 14 }]}>Хрум · версия 1.3</Text>
     </ScrollView>
   );
 }
@@ -313,6 +403,13 @@ export const resetAll = () => defaultData();
 const st = StyleSheet.create({
   group: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   groupHead: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18 },
+  step: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  stepT: { fontSize: 26, color: C.accent, marginTop: -2 },
+  sw: { minWidth: 64, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.lineStrong, backgroundColor: C.surface },
   calc: { backgroundColor: C.accentSoft, borderRadius: 10, padding: 14 },
   line: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
+});
+
+const fav = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 52, paddingHorizontal: 12, borderRadius: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
 });

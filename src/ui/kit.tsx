@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, RADIUS, T } from '../theme';
+import { C, noOutline, RADIUS, T } from '../theme';
 import { Icon, IconName } from './Icon';
 
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle | ViewStyle[] }) {
@@ -38,16 +38,16 @@ export function Tabs<K extends string>({ items, value, onChange, style }: {
 }
 
 /** Компактный сегментированный переключатель. */
-export function Seg<K extends string | number>({ items, value, onChange, style }: {
-  items: { key: K; label: string }[]; value: K; onChange: (k: K) => void; style?: ViewStyle;
+export function Seg<K extends string | number>({ items, value, onChange, style, big }: {
+  items: { key: K; label: string }[]; value: K; onChange: (k: K) => void; style?: ViewStyle; big?: boolean;
 }) {
   return (
     <View style={[s.seg, style]}>
       {items.map((it) => {
         const on = it.key === value;
         return (
-          <Pressable key={String(it.key)} onPress={() => onChange(it.key)} style={[s.segItem, on && s.segOn]}>
-            <Text style={[T.body, { fontSize: 13, color: on ? C.ink : C.muted, fontWeight: on ? '600' : '500' }]}>{it.label}</Text>
+          <Pressable key={String(it.key)} onPress={() => onChange(it.key)} style={[s.segItem, big && { paddingVertical: 12 }, on && s.segOn]}>
+            <Text style={[T.body, { fontSize: big ? 15 : 13, color: on ? C.ink : C.muted, fontWeight: on ? '600' : '500' }]}>{it.label}</Text>
           </Pressable>
         );
       })}
@@ -99,9 +99,9 @@ export function LinkBtn({ label, onPress, color = C.inkSoft }: { label: string; 
   );
 }
 
-export function IconBtn({ name, onPress, color = C.inkSoft, size = 20, style }: { name: IconName; onPress: () => void; color?: string; size?: number; style?: ViewStyle }) {
+export function IconBtn({ name, onPress, color = C.inkSoft, size = 20, style, label }: { name: IconName; onPress: () => void; color?: string; size?: number; style?: ViewStyle; label?: string }) {
   return (
-    <Pressable onPress={onPress} hitSlop={8} style={({ pressed }) => [{ padding: 6, borderRadius: 8, opacity: pressed ? 0.5 : 1 }, style]}>
+    <Pressable accessibilityLabel={label} onPress={onPress} hitSlop={8} style={({ pressed }) => [{ padding: 6, borderRadius: 8, opacity: pressed ? 0.5 : 1 }, style]}>
       <Icon name={name} size={size} color={color} />
     </Pressable>
   );
@@ -112,7 +112,7 @@ export function Field({ label, suffix, style, ...props }: TextInputProps & { lab
     <View style={style}>
       {label ? <Text style={[T.small, { marginBottom: 5 }]}>{label}</Text> : null}
       <View style={s.field}>
-        <TextInput placeholderTextColor={C.muted} {...props} style={[T.body, { flex: 1, paddingVertical: 9, fontVariant: ['tabular-nums'] }]} />
+        <TextInput placeholderTextColor={C.muted} {...props} style={[T.body, { flex: 1, paddingVertical: 9, fontVariant: ['tabular-nums'] }, noOutline]} />
         {suffix ? <Text style={[T.small, { marginLeft: 6 }]}>{suffix}</Text> : null}
       </View>
     </View>

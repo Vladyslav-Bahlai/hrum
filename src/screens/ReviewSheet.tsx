@@ -5,7 +5,7 @@ import { ActBtn, Btn, Hair, NumField, Seg, Sheet } from '../ui/kit';
 import { AmountPicker } from '../ui/Amount';
 import { Icon } from '../ui/Icon';
 import { FoodItem, MealType } from '../types';
-import { fmt, known, macroText, getMeals, r0 } from '../utils';
+import { fmt, formatTimeInput, known, macroText, getMeals, mealAtMinutes, minutesLabel, parseTime, r0, shiftMinutes } from '../utils';
 import { DishPicker } from './Dishes';
 
 export interface Draft { item: FoodItem; portion: number; on: boolean }
@@ -13,21 +13,32 @@ export interface Draft { item: FoodItem; portion: number; on: boolean }
 const blank = (): FoodItem => ({ name: '' });
 
 /** Проверка результата ИИ / ручной ввод / редактирование записи. */
-export function ReviewSheet({ visible, onClose, initial, meal: meal0, comment, photo, mode, onSave, onDelete, isFav, onFav }: {
+export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: minutes0, comment, photo, mode, onSave, onDelete, isFav, onFav }: {
   visible: boolean;
   onClose: () => void;
   initial: Draft[];
   meal: MealType;
+  /** время приёма пищи, минут от полуночи */
+  minutes: number;
   comment?: string;
   photo?: string;
   mode: 'ai' | 'manual' | 'edit';
-  onSave: (drafts: Draft[], meal: MealType) => void;
+  onSave: (drafts: Draft[], meal: MealType, minutes: number) => void;
   onDelete?: () => void;
   isFav?: (i: FoodItem) => boolean;
   onFav?: (i: FoodItem) => void;
 }) {
   const [drafts, setDrafts] = useState<Draft[]>(initial);
   const [meal, setMeal] = useState<MealType>(meal0);
+  const [timeText, setTimeText] = useState(minutesLabel(minutes0));
+  // категорию пересчитываем по времени, только пока пользователь не выбрал её сам
+  const [mealPicked, setMealPicked] = useState(false);
+  const minutes = parseTime(timeText);
+  const changeTime = (text: string) => {
+    setTimeText(text);
+    const m = parseTime(text);
+    if (m !== null && !mealPicked) setMeal(mealAtMinutes(m));
+  };
   const [open, setOpen] = useState<number | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
 
@@ -35,6 +46,8 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, comment, p
     if (visible) {
       setDrafts(initial.length ? initial : [{ item: blank(), portion: 1, on: true }]);
       setMeal(meal0);
+      setTimeText(minutesLabel(minutes0));
+      setMealPicked(false);
       setOpen(mode === 'manual' ? 0 : null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -55,14 +68,34 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, comment, p
       footer={
         <View style={{ gap: 10 }}>
           <Btn label={chosen.length ? `${mode === 'edit' ? 'Сохранить' : 'Добавить'} · ${fmt(total)} ккал${unkCount ? ' +?' : ''}` : 'Ничего не выбрано'}
-            disabled={!chosen.length} onPress={() => onSave(chosen, meal)} style={{ paddingVertical: 16 }} />
+            disabled={!chosen.length || minutes === null} onPress={() => onSave(chosen, meal, minutes ?? minutes0)} style={{ paddingVertical: 16 }} />
           {onDelete ? <ActBtn label="Удалить запись" icon="trash" danger onPress={onDelete} style={{ flex: 0 }} /> : null}
         </View>
       }>
       {photo ? <Image source={{ uri: photo }} style={{ width: '100%', height: 150, borderRadius: 12, marginBottom: 12 }} /> : null}
       {comment ? <Text style={[T.bodySoft, { marginBottom: 12, fontStyle: 'italic' }]}>{comment}</Text> : null}
 
-      <Seg items={getMeals().map((m) => ({ key: m.key, label: m.label }))} value={meal} onChange={setMeal} style={{ marginBottom: 14 }} />
+      <Seg items={getMeals().map((m) => ({ key: m.key, label: m.label }))} value={meal} onChange={(k) => { setMeal(k); setMealPicked(true); }} style={{ marginBottom: 12 }} />
+
+      <View style={st.timeRow}>
+        <Text style={[T.body, { flex: 1 }]}>Время</Text>
+        <Pressable accessibilityLabel="Раньше на 15 минут" onPress={() => changeTime(minutesLabel(shiftMinutes(minutes ?? minutes0, -15)))} style={st.timeBtn} hitSlop={4}>
+          <Text style={st.timeBtnT}>−</Text>
+        </Pressable>
+        <TextInput
+          value={timeText}
+          onChangeText={(t) => changeTime(formatTimeInput(t))}
+          keyboardType="number-pad"
+          placeholder="ЧЧ:ММ"
+          placeholderTextColor={C.muted}
+          maxLength={5}
+          selectTextOnFocus
+          style={[T.h3, st.timeInput, minutes === null && { borderColor: C.over, color: C.over }]}
+        />
+        <Pressable accessibilityLabel="Позже на 15 минут" onPress={() => changeTime(minutesLabel(shiftMinutes(minutes ?? minutes0, 15)))} style={st.timeBtn} hitSlop={4}>
+          <Text style={st.timeBtnT}>+</Text>
+        </Pressable>
+      </View>
 
       {many ? (
         <Text style={[T.small, { marginBottom: 6 }]}>Отметьте, что съели, и выберите порцию</Text>
@@ -147,6 +180,10 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, comment, p
 }
 
 const st = StyleSheet.create({
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  timeBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  timeBtnT: { fontSize: 24, color: C.accent, marginTop: -2 },
+  timeInput: { width: 92, height: 44, textAlign: 'center', borderRadius: 12, borderWidth: 1, borderColor: C.lineStrong, backgroundColor: C.surface, paddingVertical: 0 },
   item: { backgroundColor: C.surface, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 1.5, borderColor: C.lineStrong, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   checkOn: { backgroundColor: C.accent, borderColor: C.accent },

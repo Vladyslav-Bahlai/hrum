@@ -42,3 +42,6 @@ export const T: Record<string, TextStyle> = {
 };
 
 export const RADIUS = 10;
+
+/** На web у поля ввода убираем чёрный контур фокуса браузера (на телефоне его нет). */
+export const noOutline: any = Platform.OS === 'web' ? { outlineStyle: 'none', outlineWidth: 0 } : {};

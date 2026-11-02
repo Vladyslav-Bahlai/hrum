@@ -203,3 +203,88 @@ export const amountLabel = (portion: number, grams?: number) => {
   if (grams) return `${Math.round(grams * portion)} г`;
   return `×${Math.round(portion * 100) / 100}`;
 };
+
+// ---------- время записи ----------
+
+/** Минуты от полуночи из метки времени. */
+export const minutesOf = (ts: number) => { const d = new Date(ts); return d.getHours() * 60 + d.getMinutes(); };
+
+/** Метка времени «дата + минуты от полуночи». */
+export const timestampAt = (dateKey: string, minutes: number) => {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(y, m - 1, d, Math.floor(minutes / 60), minutes % 60).getTime();
+};
+
+/** «1930» → «19:30», «9» → «9», «093» → «09:3»: подстановка двоеточия при вводе цифр. */
+export const formatTimeInput = (raw: string) => {
+  const digits = raw.replace(/\D/g, '').slice(0, 4);
+  return digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+};
+
+/** «19:30» / «9:05» / «930» → минуты от полуночи; некорректное → null. */
+export const parseTime = (text: string): number | null => {
+  const t = text.trim();
+  let h: number, m: number;
+  const c = /^(\d{1,2})[:.](\d{1,2})$/.exec(t);
+  if (c) { h = +c[1]; m = +c[2]; if (c[2].length < 2) return null; }
+  else if (/^\d{3,4}$/.test(t)) { h = +t.slice(0, -2); m = +t.slice(-2); }
+  else return null;
+  return h < 24 && m < 60 ? h * 60 + m : null;
+};
+
+/** Сдвиг времени на шаг с переходом через полночь не делаем — упираемся в границы суток. */
+export const shiftMinutes = (min: number, delta: number) => Math.max(0, Math.min(1439, min + delta));
+
+// ---------- меню: остатки и закрытые блюда ----------
+
+/** Сколько порций каждого блюда меню отмечено в дневнике за день. */
+export const eatenByName = (entries: Entry[], date: string, menuId: string): Record<string, number> => {
+  const map: Record<string, number> = {};
+  for (const e of entries) if (e.date === date && e.menuId === menuId) map[e.item.name] = (map[e.item.name] || 0) + e.portion;
+  return map;
+};
+
+export const isClosed = (menu: { closed?: string[] }, name: string) => !!menu.closed?.includes(name);
+
+/** «осталась ½» / «осталась ¼» / «осталась ⅓» / «осталось 30%»; null — если съедено целиком. */
+export const remainLabel = (eaten: number): string | null => {
+  if (eaten >= 0.99) return null;
+  const rest = 1 - eaten;
+  const near = (v: number) => Math.abs(rest - v) < 0.02;
+  if (near(0.5)) return 'осталась ½';
+  if (near(0.25)) return 'осталась ¼';
+  if (near(1 / 3)) return 'осталась ⅓';
+  if (near(2 / 3)) return 'осталось ⅔';
+  if (near(0.75)) return 'осталось ¾';
+  return `осталось ${Math.max(1, Math.round(rest * 100))}%`;
+};
+
+export type DishState = { kind: 'none' | 'part' | 'done' | 'closed'; label: string };
+/** Состояние блюда меню в выбранный день. */
+export const dishState = (eaten: number, closed: boolean): DishState => {
+  if (closed) return { kind: 'closed', label: 'закрыто' };
+  if (eaten <= 0.001) return { kind: 'none', label: '' };
+  const rest = remainLabel(eaten);
+  if (rest) return { kind: 'part', label: rest };
+  const f = PORTIONS.find((p) => Math.abs(p.v - eaten) < 0.01);
+  return { kind: 'done', label: eaten > 1.01 ? `съедено ${f ? f.label : r1(eaten)}` : 'съедено' };
+};
+
+/** Блюда, которые ещё предстоит отметить: не тронутые и не закрытые. */
+export const restItems = (menu: { items: FoodItem[]; closed?: string[] }, eaten: Record<string, number>) =>
+  menu.items.filter((it) => !eaten[it.name] && !isClosed(menu, it.name));
+
+/** Сколько блюд осталось в меню(ах) дня. */
+export const menuLeftCount = (menus: { id: string; items: FoodItem[]; closed?: string[] }[], entries: Entry[], date: string) =>
+  menus.reduce((n, m) => n + restItems(m, eatenByName(entries, date, m.id)).length, 0);
+
+export interface AdSlide { menuId: string; menuTitle: string; item: FoodItem }
+/** Блюда для «рекламной» карусели: несъеденные и незакрытые; при нескольких меню порядок перемешан. */
+export const carouselSlides = (menus: { id: string; title: string; items: FoodItem[]; closed?: string[] }[], entries: Entry[], date: string, rng: () => number = Math.random): AdSlide[] => {
+  const out: AdSlide[] = [];
+  for (const m of menus) for (const item of restItems(m, eatenByName(entries, date, m.id))) out.push({ menuId: m.id, menuTitle: m.title, item });
+  if (menus.length > 1) {
+    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  }
+  return out;
+};
