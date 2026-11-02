@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Хрум",
+    "slug": "hrum",
+    "version": "1.2.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F4F5F0",
+    "splash": {
+      "backgroundColor": "#F4F5F0"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.hrum.diary",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Камера нужна, чтобы фотографировать еду и меню для подсчёта калорий.",
+        "NSPhotoLibraryUsageDescription": "Доступ к фото нужен, чтобы выбрать снимок блюда или меню."
+      }
+    },
+    "android": {
+      "package": "com.hrum.diary",
+      "versionCode": 3,
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "backgroundColor": "#2F6249",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.VIBRATE"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Доступ к фото нужен, чтобы выбрать снимок блюда или меню.",
+          "cameraPermission": "Камера нужна, чтобы фотографировать еду и меню для подсчёта калорий.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

@@ -1,0 +1,607 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { play } from '../sound';
+import { C, T } from '../theme';
+import { Icon } from '../ui/Icon';
+import { ActBtn, Btn, Chip, Field, NumField, Sheet, Unk } from '../ui/kit';
+import { AmountPicker } from '../ui/Amount';
+import { useStore } from '../store';
+import { analyzeFood } from '../ai';
+import { getKey, persistPhoto } from '../storage';
+import { fromCamera, fromGallery, Picked } from '../media';
+import { FoodItem, Menu } from '../types';
+import { fmt, humanDate, kcalOf, kcalText, known, macroText, menuTitleFor, plural, PORTIONS, r0, r1, sum, uid } from '../utils';
+import { useToast } from '../ui/Toast';
+import { Tabs } from '../ui/kit';
+import { DishesView, DishPicker } from './Dishes';
+
+/** Вкладка «Меню»: сохранённые меню, добавление блюда в дневник одним тапом. */
+export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish }: {
+  date: string;
+  /** отступ снизу для плавающей панели инструментов */
+  bottom: number;
+  /** запрос из дневника: открыть выбор прошлого меню / загрузку / конструктор */
+  request?: { n: number; kind: 'attach' | 'upload' | 'manual' };
+  go: (n: number) => void;
+  openCalendar: () => void;
+  topInset: number;
+  onAdd: (item: FoodItem, portion: number, menu: Menu) => void;
+  onAddAll: (items: FoodItem[], menu: Menu) => void;
+  onAddDish: (item: FoodItem) => void;
+}) {
+  const store = useStore();
+  const [view, setView] = useState<'menu' | 'dishes'>('menu');
+  // меню показываются только на тех днях, к которым привязаны (будущие дни — пустые, без «вчерашнего»)
+  const menus = useMemo(() => store.data.menus.filter((m) => m.dates.includes(date)), [store.data.menus, date]);
+  const toast = useToast();
+  const [replace, setReplace] = useState<{ index: number } | null>(null);
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const [pickOld, setPickOld] = useState(false);
+  const [sel, setSel] = useState<string | undefined>(menus[0]?.id);
+  const [create, setCreate] = useState(false);
+  const [edit, setEdit] = useState<Menu | null>(null);
+  const [portionFor, setPortionFor] = useState<{ item: FoodItem; index: number } | null>(null);
+  const [amount, setAmount] = useState(1);
+  useEffect(() => { if (portionFor) setAmount(1); }, [portionFor?.index, portionFor?.item.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!menus.find((m) => m.id === sel)) setSel(menus[0]?.id);
+  }, [menus, sel]);
+  useEffect(() => {
+    if (!request) return;
+    setView('menu');
+    if (request.kind === 'attach') setPickOld(true);
+    else if (request.kind === 'upload') setCreate(true);
+    else setEdit(blankMenu(date));
+  }, [request?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const menu = menus.find((m) => m.id === sel);
+
+  // сколько раз блюдо уже отмечено в выбранный день
+  const eaten = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (!menu) return map;
+    for (const e of store.data.entries) {
+      if (e.date === date && e.menuId === menu.id) map[e.item.name] = (map[e.item.name] || 0) + e.portion;
+    }
+    return map;
+  }, [store.data.entries, date, menu]);
+
+  const sections = useMemo(() => {
+    const out: { title: string; items: FoodItem[] }[] = [];
+    for (const it of menu?.items || []) {
+      const t = it.section || '';
+      const last = out[out.length - 1];
+      if (last && last.title === t) last.items.push(it);
+      else out.push({ title: t, items: [it] });
+    }
+    return out;
+  }, [menu]);
+
+  const total = menu ? sum(menu.items.map((item) => ({ item, portion: 1 } as any))) : null;
+
+  const add = (item: FoodItem, portion: number) => {
+    if (!menu) return;
+    onAdd(item, portion, menu);
+  };
+
+  return (
+    <View style={{ flex: 1 }}>
+      {/* шапка */}
+      <View style={[st.head, { paddingTop: topInset + 6 }]}>
+        <Pressable onPress={() => go(-1)} hitSlop={8} style={{ padding: 6 }}><Icon name="left" size={24} color={C.inkSoft} /></Pressable>
+        <Pressable onPress={openCalendar} style={{ flex: 1, alignItems: 'center' }} hitSlop={6}>
+          <Text style={T.small}>Меню на</Text>
+          <Text style={T.h2} numberOfLines={1}>{humanDate(date)}</Text>
+        </Pressable>
+        <Pressable onPress={() => go(1)} hitSlop={8} style={{ padding: 6 }}><Icon name="right" size={24} color={C.inkSoft} /></Pressable>
+      </View>
+
+      <Tabs items={[{ key: 'menu', label: 'Меню дня', n: menus.length || undefined }, { key: 'dishes', label: 'Мои блюда', n: store.data.favorites.length || undefined }]}
+        value={view} onChange={setView} style={{ paddingHorizontal: 20 }} />
+
+      {view === 'dishes' ? <DishesView onAdd={onAddDish} /> : null}
+
+      {view === 'menu' && menus.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 0 }}
+          contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingTop: 12, alignItems: 'center' }}>
+          {menus.map((m) => {
+            const on = m.id === sel;
+            return (
+              <Pressable key={m.id} onPress={() => setSel(m.id)} style={[st.pill, on && st.pillOn]}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: on ? C.white : C.inkSoft }} numberOfLines={1}>{m.title}</Text>
+                {m.done ? <Text style={{ fontSize: 12, color: on ? '#D6E8DC' : C.muted, marginLeft: 6 }}>съедено</Text> : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+
+      {view !== 'menu' ? null : !menu ? (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 230 }} keyboardShouldPersistTaps="handled">
+          <View style={st.empty}>
+            <Text style={[T.h2, { textAlign: 'center' }]}>На этот день меню нет</Text>
+            <Text style={[T.bodySoft, { textAlign: 'center', marginTop: 8 }]}>
+              Загрузите новое меню — или возьмите одно из прошлых ниже. Внизу — панель инструментов.
+            </Text>
+          </View>
+          <PastMenus date={date} limit={3} onTaken={(id) => setSel(id)} onAll={() => setPickOld(true)} />
+        </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={{ paddingBottom: 290 }} showsVerticalScrollIndicator={false}>
+          {menu.done ? (
+            <View style={st.yBanner}>
+              <Text style={[T.bodySoft, { fontSize: 14 }]}>Меню отмечено как полностью съеденное — оно не предлагается для переноса на новые дни.</Text>
+            </View>
+          ) : null}
+          <View style={st.paper}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              <View style={{ flex: 1 }}>
+                <Text style={[T.h2, { textAlign: 'left' }]}>{menu.title}</Text>
+                {total ? (
+                  <Text style={[T.small, { marginTop: 3 }]}>
+                    {menu.items.length} блюд · всего {fmt(total.kcal)}{total.unk.kcal ? <Unk /> : null} ккал · Б {r0(total.protein)}{total.unk.protein ? <Unk /> : null} Ж {r0(total.fat)}{total.unk.fat ? <Unk /> : null} У {r0(total.carbs)}{total.unk.carbs ? <Unk /> : null}
+                  </Text>
+                ) : null}
+              </View>
+              <Pressable onPress={() => setEdit(menu)} hitSlop={10} style={{ padding: 4 }}>
+                <Icon name="edit" size={20} color={C.inkSoft} />
+              </Pressable>
+            </View>
+
+            {sections.map((sec, si) => (
+              <View key={si} style={{ marginTop: 18 }}>
+                {sec.title ? (
+                  <View style={st.secHead}>
+                    <View style={st.secLine} />
+                    <Text style={st.secTitle}>{sec.title}</Text>
+                    <View style={st.secLine} />
+                  </View>
+                ) : null}
+                {sec.items.map((it, i) => {
+                  const n = eaten[it.name] || 0;
+                  return (
+                    <Pressable key={i} onLongPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} delayLongPress={300}
+                      onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} style={({ pressed }) => [st.dish, pressed && { opacity: 0.7 }]}>
+                      <View style={[st.num, n ? { backgroundColor: C.accent, borderColor: C.accent } : null]}>
+                        <Text style={[st.numT, n ? { color: C.white } : null]}>{menu.items.indexOf(it) + 1}</Text>
+                      </View>
+                      <View style={{ flex: 1, paddingRight: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                          <Text style={[T.h3, { flex: 1 }]}>{it.name}</Text>
+                          <Text style={[T.body, T.num, { fontWeight: '700', marginLeft: 8 }, !known(it).kcal && { color: C.muted }]}>{known(it).kcal ? fmt(it.kcal!) : '—'}</Text>
+                        </View>
+                        <Text style={[T.small, { marginTop: 3 }]}>
+                          {it.grams ? `${r0(it.grams)} г · ` : ''}{macroText(it, 1, true)}
+                        </Text>
+                        {it.note ? <Text style={[T.small, { color: C.inkSoft, marginTop: 2 }]} numberOfLines={2}>{it.note}</Text> : null}
+                        {n ? (
+                          <View style={st.eaten}>
+                            <Icon name="check" size={13} color={C.accent} stroke={2.6} />
+                            <Text style={{ color: C.accent, fontSize: 12.5, fontWeight: '700' }}>
+                              съедено {PORTIONS.find((p) => Math.abs(p.v - n) < 0.01)?.label ?? r1(n)}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Pressable onPress={() => add(it, 1)} onLongPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} hitSlop={6}
+                        style={({ pressed }) => [st.plus, n ? { backgroundColor: C.accentSoft } : null, pressed && { transform: [{ scale: 0.92 }] }]}>
+                        <Icon name="plus" size={24} color={n ? C.accent : C.white} stroke={2.4} />
+                      </Pressable>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
+            {(() => {
+              const rest = menu.items.filter((it) => !eaten[it.name]);
+              return rest.length ? (
+                <Btn label={rest.length === menu.items.length ? `Съел всё меню · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал` : `Отметить остальное (${rest.length}) · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал`}
+                  kind="soft" icon="check" onPress={() => onAddAll(rest, menu)} style={{ marginTop: 18 }} />
+              ) : (
+                <Text style={[T.body, { textAlign: 'center', marginTop: 18, color: C.accent, fontWeight: '600' }]}>Всё меню отмечено ✓</Text>
+              );
+            })()}
+            <Text style={[T.small, { textAlign: 'center', marginTop: 12 }]}>«+» — целая порция · нажмите на блюдо — порция или граммы</Text>
+          </View>
+          {menu.photo ? <Image source={{ uri: menu.photo }} style={{ marginHorizontal: 16, marginTop: 14, height: 160, borderRadius: 12, opacity: 0.9 }} resizeMode="cover" /> : null}
+        </ScrollView>
+      )}
+
+      {portionFor && menu ? (
+        <Sheet visible onClose={() => setPortionFor(null)} title={portionFor.item.name}
+          footer={
+            <View style={{ gap: 8, paddingBottom: 4 }}>
+              <Btn label={`Добавить · ${kcalText(portionFor.item, amount)}`} onPress={() => { add(portionFor.item, amount); setPortionFor(null); }}
+                style={{ paddingVertical: 16 }} disabled={amount <= 0} />
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <ActBtn label="Заменить" icon="repeat" onPress={() => { setReplace({ index: portionFor.index }); setPortionFor(null); }} />
+                <ActBtn label="Изменить" icon="edit" onPress={() => { setEditIndex(portionFor.index); setEdit(menu); setPortionFor(null); }} />
+                <ActBtn label="" icon={store.isFavorite(portionFor.item) ? 'starFill' : 'star'} on={store.isFavorite(portionFor.item)} style={{ flex: 0, width: 52, paddingHorizontal: 0 }}
+                  onPress={() => { store.isFavorite(portionFor.item) ? store.toggleFavorite(portionFor.item) : store.savePreset(portionFor.item); }} />
+                <ActBtn label="" icon="trash" danger style={{ flex: 0, width: 52, paddingHorizontal: 0 }}
+                  onPress={() => {
+                    const it = portionFor.item; const idx = portionFor.index;
+                    Alert.alert('Убрать блюдо из меню?', `«${it.name}» исчезнет из меню. Записи в дневнике останутся.`, [
+                      { text: 'Отмена', style: 'cancel' },
+                      { text: 'Убрать', style: 'destructive', onPress: () => { store.saveMenu({ ...menu, items: menu.items.filter((_, j) => j !== idx) }); setPortionFor(null); } },
+                    ]);
+                  }} />
+              </View>
+            </View>
+          }>
+          <Text style={[T.small, { marginBottom: 12 }]}>
+            Полная порция: {kcalText(portionFor.item)}{portionFor.item.grams ? ` · ${r0(portionFor.item.grams)} г` : ''} · {macroText(portionFor.item)}
+          </Text>
+          <AmountPicker big value={amount} onChange={setAmount} gramsPerPortion={portionFor.item.grams} kcalPerPortion={portionFor.item.kcal}
+            onGramsKnown={(g) => { const it = { ...portionFor.item, grams: g }; store.replaceMenuItem(menu.id, portionFor.index, it); setPortionFor({ ...portionFor, item: it }); }} />
+        </Sheet>
+      ) : null}
+
+      {replace && menu ? (
+        <DishPicker visible title="Заменить на…" onClose={() => setReplace(null)}
+          onManual={() => { setEditIndex(replace.index); setEdit(menu); setReplace(null); }}
+          onPick={(item) => { store.replaceMenuItem(menu.id, replace.index, item); setReplace(null); play('preset'); }} />
+      ) : null}
+
+      {pickOld ? (
+        <Sheet visible onClose={() => setPickOld(false)} title="Меню из прошлых дней">
+          <PastMenus date={date} onTaken={(id) => { setSel(id); setPickOld(false); }} onAll={() => {}} showAll />
+        </Sheet>
+      ) : null}
+      <MenuToolbar bottom={bottom} hidden={view !== 'menu'} menu={menu}
+        onUpload={() => setCreate(true)} onManual={() => setEdit(blankMenu(date))} onPast={() => setPickOld(true)}
+        onEdit={() => menu && setEdit(menu)}
+        onDone={() => { if (!menu) return; const v = !menu.done; store.setMenuDone(menu.id, v); toast({ text: v ? 'Меню отмечено съеденным' : 'Меню снова в списке переноса', action: 'Отменить', onAction: () => store.setMenuDone(menu.id, !v) }); }}
+        onDetach={() => { if (!menu) return; store.detachMenu(menu.id, date); toast({ text: 'Меню убрано из этого дня', action: 'Вернуть', onAction: () => store.attachMenu(menu.id, date) }); }}
+        onDelete={() => {
+          if (!menu) return;
+          Alert.alert('Удалить меню совсем?', `«${menu.title}» исчезнет со всех дней. Записи в дневнике останутся.`, [
+            { text: 'Отмена', style: 'cancel' },
+            { text: 'Удалить', style: 'destructive', onPress: () => store.deleteMenu(menu.id) },
+          ]);
+        }} />
+      <MenuCreateSheet visible={create} date={date} onClose={() => setCreate(false)} onParsed={(m) => { setCreate(false); setEdit(m); }}
+        onMany={(list) => { setCreate(false); list.forEach((m) => store.saveMenu(m)); setSel(list[0]?.id); toast({ text: `Создано меню: ${list.length}` }); }}
+        onManual={() => { setCreate(false); setEdit(blankMenu(date)); }} />
+      {edit ? (
+        <MenuEditSheet menu={edit} openIndex={editIndex} onClose={() => { setEdit(null); setEditIndex(null); }}
+          onSave={(m) => { store.saveMenu(m); setSel(m.id); setEdit(null); setEditIndex(null); }}
+          onDetach={edit.dates.length > 1 && edit.dates.includes(date) ? () => { store.detachMenu(edit.id, date); setEdit(null); } : undefined}
+          onDelete={store.data.menus.some((x) => x.id === edit.id) ? () => {
+            Alert.alert('Удалить меню?', `«${edit.title}» будет удалено. Записи в дневнике останутся.`, [
+              { text: 'Отмена', style: 'cancel' },
+              { text: 'Удалить', style: 'destructive', onPress: () => { store.deleteMenu(edit.id); setEdit(null); } },
+            ]);
+          } : undefined} />
+      ) : null}
+    </View>
+  );
+}
+
+/** Загрузка нового меню: фото/текст → ИИ. */
+function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }: { visible: boolean; date: string; onClose: () => void; onParsed: (m: Menu) => void; onMany: (m: Menu[]) => void; onManual: () => void }) {
+  const { data } = useStore();
+  const [text, setText] = useState('');
+  const [photos, setPhotos] = useState<Picked[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { if (visible) { setText(''); setPhotos([]); } }, [visible]);
+
+  const pick = async (src: 'camera' | 'gallery') => {
+    const p = src === 'camera' ? await fromCamera() : await fromGallery(6 - photos.length);
+    if (p.length) setPhotos((x) => [...x, ...p].slice(0, 6));
+  };
+
+  const run = async () => {
+    const key = await getKey(data.ai.provider);
+    const title = menuTitleFor(date);
+    if (!key) {
+      onParsed({ id: uid(), title, created: Date.now(), dates: [date], items: [] });
+      Alert.alert('Нет ключа ИИ', 'Добавьте ключ в настройках — или заполните меню вручную.');
+      return;
+    }
+    setBusy(true);
+    try {
+      // каждое фото — отдельное меню (несколько страниц/дней не склеиваются в одно)
+      const jobs: (Picked | null)[] = photos.length ? photos : [null];
+      const results = await Promise.allSettled(jobs.map((p) =>
+        analyzeFood(data.ai, key, text || 'Распознай меню на фото.', p ? [{ base64: p.base64, mime: p.mime }] : [], { mode: 'menu' })));
+      const made: Menu[] = [];
+      let fail = '';
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') { fail = (r.reason as any)?.message || String(r.reason); return; }
+        if (!r.value.items.length) { fail = r.value.comment || 'Меню не распознано'; return; }
+        const p = jobs[i];
+        made.push({
+          id: uid(), title: jobs.length > 1 ? `${menuTitleFor(date)} · ${i + 1}` : menuTitleFor(date), created: Date.now() + i, dates: [date],
+          items: r.value.items.map(({ portion, ...it }) => it),
+          photo: p ? persistPhoto(p.uri) : undefined,
+        });
+      });
+      if (!made.length) { Alert.alert('Меню не распознано', fail || 'Попробуйте фото почётче или текстом.'); return; }
+      play('ai');
+      if (fail) Alert.alert('Часть меню не распознана', `Создано: ${made.length} из ${jobs.length}. ${fail}`);
+      if (made.length === 1) onParsed(made[0]);
+      else onMany(made);
+    } catch (e: any) {
+      Alert.alert('Не получилось', e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const can = (text.trim() || photos.length) && !busy;
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Новое меню"
+      footer={<Btn label={busy ? 'Распознаю меню…' : 'Распознать'} onPress={run} disabled={!can} style={{ paddingVertical: 16 }} />}>
+      <ActBtn label="Собрать меню вручную" icon="edit" onPress={onManual} style={{ flex: 0, marginBottom: 16, minHeight: 54 }} />
+      <Text style={[T.bodySoft, { marginBottom: 14 }]}>Или сфотографируйте меню / вставьте текст — ИИ разберёт сам. Несколько фото — несколько отдельных меню (по одному на фото).</Text>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Pressable onPress={() => pick('camera')} style={st.bigPick}>
+          <Icon name="camera" size={28} color={C.accent} />
+          <Text style={st.bigPickT}>Камера</Text>
+        </Pressable>
+        <Pressable onPress={() => pick('gallery')} style={st.bigPick}>
+          <Icon name="image" size={28} color={C.accent} />
+          <Text style={st.bigPickT}>Галерея</Text>
+        </Pressable>
+      </View>
+      {photos.length ? (
+        <ScrollView horizontal contentContainerStyle={{ gap: 8, paddingTop: 12 }}>
+          {photos.map((p, i) => (
+            <Pressable key={i} onPress={() => setPhotos((x) => x.filter((_, j) => j !== i))}>
+              <Image source={{ uri: p.uri }} style={{ width: 70, height: 70, borderRadius: 10 }} />
+              <View style={st.x}><Icon name="close" size={11} color={C.white} stroke={2.4} /></View>
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
+      <TextInput value={text} onChangeText={setText} multiline placeholder={'Например:\nЗавтрак — сырники со сметаной, кофе\nОбед — борщ, котлета с пюре…'}
+        placeholderTextColor={C.muted} style={[T.body, st.textArea]} />
+      {busy ? <ActivityIndicator color={C.accent} style={{ marginTop: 10 }} /> : null}
+    </Sheet>
+  );
+}
+
+const blankMenu = (date: string): Menu => ({ id: uid(), title: menuTitleFor(date), created: Date.now(), dates: [date], items: [] });
+
+/** Стандартные разделы доставки — для быстрого добавления в конструкторе. */
+const SECTIONS = ['Завтрак', 'Второй завтрак', 'Обед', 'Салат', 'Ужин', 'Второй ужин'];
+
+/** Конструктор / редактор меню: разделы, нумерованные блюда, порядок, значения (необязательные). */
+function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }: { menu: Menu; openIndex?: number | null; onClose: () => void; onSave: (m: Menu) => void; onDelete?: () => void; onDetach?: () => void }) {
+  const isNew = !onDelete;
+  const [m, setM] = useState<Menu>(menu);
+  const [open, setOpen] = useState<number | null>(openIndex ?? null);
+  const [picker, setPicker] = useState<string | null>(null); // раздел, в который добавляем из «Моих блюд» ('' — без раздела)
+  const setItem = (i: number, patch: Partial<FoodItem>) => setM((x) => ({ ...x, items: x.items.map((it, j) => (j === i ? { ...it, ...patch } : it)) }));
+
+  /** Вставляет блюдо после последнего блюда того же раздела — чтобы разделы не разваливались. */
+  const insert = (section: string | undefined, base?: FoodItem): number => {
+    let at = m.items.length;
+    if (section) for (let i = m.items.length - 1; i >= 0; i--) if ((m.items[i].section || '') === section) { at = i + 1; break; }
+    const item: FoodItem = { ...(base || { name: '' }), section: section ?? base?.section ?? m.items[m.items.length - 1]?.section, portion: undefined };
+    setM((x) => { const items = [...x.items]; items.splice(at, 0, item); return { ...x, items }; });
+    return at;
+  };
+  const move = (i: number, d: -1 | 1) => {
+    const j = i + d;
+    if (j < 0 || j >= m.items.length) return;
+    setM((x) => { const items = [...x.items]; [items[i], items[j]] = [items[j], items[i]]; return { ...x, items }; });
+    setOpen(j);
+  };
+  const remove = (i: number) => { setM((x) => ({ ...x, items: x.items.filter((_, j) => j !== i) })); setOpen(null); };
+
+  const total = sum(m.items.map((item) => ({ item, portion: 1 } as any)));
+  const valid = m.items.filter((i) => i.name.trim());
+
+  return (
+    <Sheet visible onClose={onClose} title={isNew ? 'Новое меню' : 'Изменить меню'}
+      footer={
+        <View style={{ gap: 6 }}>
+          <Btn label={valid.length ? `Сохранить меню · ${valid.length} блюд` : 'Добавьте хотя бы одно блюдо'} disabled={!valid.length}
+            onPress={() => onSave({ ...m, title: m.title.trim() || menuTitleFor(m.dates[0] || ''), items: valid })} style={{ paddingVertical: 16 }} />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {onDetach ? <ActBtn label="Убрать из дня" icon="close" onPress={onDetach} /> : null}
+            {onDelete ? <ActBtn label="Удалить меню" icon="trash" danger onPress={onDelete} /> : null}
+          </View>
+        </View>
+      }>
+      <Field label="Название меню" placeholder="Например: Понедельник, 2 ноября" value={m.title} onChangeText={(t) => setM((x) => ({ ...x, title: t }))} />
+
+      {m.items.length ? (
+        <Text style={[T.small, { marginTop: 12 }]}>
+          {m.items.length} {plural(m.items.length, 'блюдо', 'блюда', 'блюд')} · {total.unk.kcal === m.items.length ? 'калории не указаны' : `${fmt(total.kcal)}${total.unk.kcal ? ' +?' : ''} ккал`}
+        </Text>
+      ) : null}
+
+      {/* блюда, пронумерованные как в меню */}
+      <View style={{ marginTop: 6 }}>
+        {m.items.map((it, i) => {
+          const expanded = open === i;
+          const kn = known(it);
+          return (
+            <View key={i} style={st.editRow}>
+              {it.section && it.section !== m.items[i - 1]?.section ? (
+                <View style={[st.secHead, { marginTop: 6 }]}>
+                  <View style={st.secLine} /><Text style={st.secTitle}>{it.section}</Text><View style={st.secLine} />
+                </View>
+              ) : null}
+              <Pressable onPress={() => setOpen(expanded ? null : i)} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 52 }}>
+                <View style={[st.num, { marginTop: 0, alignSelf: 'center' }]}><Text style={st.numT}>{i + 1}</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[T.body, { fontWeight: '500' }]} numberOfLines={2}>{it.name || 'Новое блюдо'}</Text>
+                  <Text style={T.small}>{kcalText(it)} · {macroText(it)}</Text>
+                </View>
+                <Icon name={expanded ? 'check' : 'edit'} size={20} color={expanded ? C.accent : C.muted} />
+              </Pressable>
+
+              {expanded ? (
+                <View style={{ gap: 10, marginTop: 10 }}>
+                  <Field placeholder="Название блюда" value={it.name} onChangeText={(t) => setItem(i, { name: t })} autoFocus={!it.name} />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8 }}>
+                    {SECTIONS.map((s) => <Chip key={s} label={s} on={it.section === s} onPress={() => setItem(i, { section: it.section === s ? undefined : s })} />)}
+                  </ScrollView>
+                  <Field placeholder="Свой раздел (необязательно)" value={SECTIONS.includes(it.section || '') ? '' : it.section || ''} onChangeText={(t) => setItem(i, { section: t })} />
+                  <Text style={T.small}>На порцию. Пустое поле = «не указано» — оно не считается нулём и не попадёт в итоги.</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <NumField optional label="Ккал" value={it.kcal} onChange={(n) => setItem(i, { kcal: n })} style={{ flex: 1 }} />
+                    <NumField optional label="Вес" suffix="г" value={it.grams} onChange={(n) => setItem(i, { grams: n || undefined })} style={{ flex: 1 }} />
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <NumField optional label="Белки" suffix="г" value={it.protein} onChange={(n) => setItem(i, { protein: n })} style={{ flex: 1 }} />
+                    <NumField optional label="Жиры" suffix="г" value={it.fat} onChange={(n) => setItem(i, { fat: n })} style={{ flex: 1 }} />
+                    <NumField optional label="Углев." suffix="г" value={it.carbs} onChange={(n) => setItem(i, { carbs: n })} style={{ flex: 1 }} />
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <ActBtn label="Выше" icon="left" onPress={() => move(i, -1)} style={{ opacity: i === 0 ? 0.4 : 1 }} />
+                    <ActBtn label="Ниже" icon="right" onPress={() => move(i, 1)} style={{ opacity: i === m.items.length - 1 ? 0.4 : 1 }} />
+                    <ActBtn label="Убрать" icon="trash" danger onPress={() => remove(i)} />
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+
+      {/* быстрые кнопки разделов */}
+      <Text style={[T.label, { marginTop: 18, marginBottom: 8 }]}>{m.items.length ? 'Добавить блюдо в раздел' : 'С чего начнём? Выберите раздел'}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {SECTIONS.map((s) => (
+          <Pressable key={s} onPress={() => setOpen(insert(s))} style={({ pressed }) => [st.secBtn, pressed && { opacity: 0.7 }]}>
+            <Icon name="plus" size={16} color={C.accent} stroke={2.2} />
+            <Text style={{ color: C.accent, fontWeight: '600', fontSize: 14 }}>{s}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+        <ActBtn label="Из моих блюд" icon="star" onPress={() => setPicker(m.items[m.items.length - 1]?.section || '')} />
+        <ActBtn label="Без раздела" icon="plus" onPress={() => setOpen(insert(m.items[m.items.length - 1]?.section))} />
+      </View>
+
+      {picker !== null ? (
+        <DishPicker visible title="Добавить в меню" onClose={() => setPicker(null)}
+          onPick={(item) => { insert(picker || undefined, item); setPicker(null); }} />
+      ) : null}
+    </Sheet>
+  );
+}
+
+const st = StyleSheet.create({
+  head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingBottom: 8 },
+  newBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.accent, paddingHorizontal: 16, height: 44, borderRadius: 22 },
+  empty: { backgroundColor: C.surface, borderRadius: 16, padding: 24, marginTop: 20, alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  paper: { backgroundColor: C.surface, marginHorizontal: 12, marginTop: 14, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  secHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
+  secLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: C.lineStrong },
+  secTitle: { fontFamily: 'Lora_400Regular_Italic', fontSize: 15, color: C.accent, letterSpacing: 0.3 },
+  pill: { flexDirection: 'row', alignItems: 'center', height: 38, paddingHorizontal: 14, borderRadius: 19, backgroundColor: C.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, maxWidth: 260 },
+  pillOn: { backgroundColor: C.accent, borderColor: C.accent },
+  num: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: C.accent, alignItems: 'center', justifyContent: 'center', marginRight: 12, alignSelf: 'flex-start', marginTop: 2 },
+  numT: { fontFamily: 'Lora_600SemiBold', fontSize: 16, color: C.accent },
+  dish: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
+  dots: { flex: 1, minWidth: 12, marginHorizontal: 6, borderBottomWidth: 1, borderStyle: 'dotted', borderColor: C.lineStrong, marginBottom: 4 },
+  plus: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+  eaten: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 6, backgroundColor: C.accentSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  pBig: { width: '31%', flexGrow: 1, height: 76, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong },
+  bigPick: { flex: 1, height: 84, borderRadius: 14, backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  bigPickT: { color: C.accent, fontWeight: '600', fontSize: 14 },
+  x: { position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center' },
+  textArea: { marginTop: 14, minHeight: 110, maxHeight: 220, textAlignVertical: 'top', backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, borderRadius: 10, padding: 12 },
+  act: { flex: 1, height: 64, borderRadius: 12, backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, alignItems: 'center', justifyContent: 'center', gap: 4 },
+  actT: { color: C.accent, fontWeight: '600', fontSize: 13 },
+  yBanner: { marginHorizontal: 12, marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: '#F3EEDF' },
+  oldCard: { backgroundColor: C.surface, borderRadius: 12, marginBottom: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  old: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10, minHeight: 60 },
+  toolbar: {
+    marginHorizontal: 12, backgroundColor: C.surface, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong,
+    shadowColor: '#0F2A1C', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 6 }, elevation: 8,
+  },
+  tool: { height: 54, paddingHorizontal: 4, borderRadius: 18, backgroundColor: C.accentTint, alignItems: 'center', justifyContent: 'center' },
+  take: { backgroundColor: C.accentSoft, paddingHorizontal: 14, height: 40, borderRadius: 20, justifyContent: 'center' },
+  secBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 46, paddingHorizontal: 14, borderRadius: 23, backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  editRow: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
+});
+
+/** Прошлые меню: последние три (без «съеденных») и «Показать все». Нажатие раскрывает состав, повторное — закрывает. */
+function PastMenus({ date, limit, onTaken, onAll, showAll }: { date: string; limit?: number; onTaken: (id: string) => void; onAll: () => void; showAll?: boolean }) {
+  const store = useStore();
+  const [open, setOpen] = useState<string | null>(null);
+  const all = useMemo(() => [...store.data.menus].filter((m) => !m.dates.includes(date))
+    .sort((a, b) => (b.dates[b.dates.length - 1] || '').localeCompare(a.dates[a.dates.length - 1] || '') || b.created - a.created), [store.data.menus, date]);
+  const fresh = all.filter((m) => !m.done);
+  const list = showAll ? all : fresh.slice(0, limit ?? 3);
+  if (!all.length) return <Text style={[T.small, { textAlign: 'center', marginTop: 20 }]}>Прошлых меню пока нет.</Text>;
+  return (
+    <View style={{ marginTop: showAll ? 0 : 22 }}>
+      {!showAll ? <Text style={[T.label, { marginLeft: 4, marginBottom: 8 }]}>Взять из прошлых</Text> : null}
+      {list.map((m) => {
+        const isOpen = open === m.id;
+        const kcal = m.items.reduce((a, b) => a + kcalOf(b), 0);
+        const last = m.dates[m.dates.length - 1];
+        return (
+          <View key={m.id} style={st.oldCard}>
+            <Pressable onPress={() => setOpen(isOpen ? null : m.id)} style={st.old}>
+              <View style={{ flex: 1 }}>
+                <Text style={T.h3} numberOfLines={1}>{m.title}</Text>
+                <Text style={T.small} numberOfLines={1}>{last ? humanDate(last) : ''} · {m.items.length} блюд · {fmt(kcal)} ккал{m.done ? ' · съедено' : ''}</Text>
+              </View>
+              <Icon name={isOpen ? 'down' : 'right'} size={18} color={C.muted} />
+            </Pressable>
+            {isOpen ? (
+              <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
+                {m.items.map((it, i) => (
+                  <View key={i}>
+                    {it.section && it.section !== m.items[i - 1]?.section ? <Text style={[T.small, { color: C.accent, marginTop: 8, fontStyle: 'italic' }]}>{it.section}</Text> : null}
+                    <View style={{ flexDirection: 'row', paddingVertical: 4 }}>
+                      <Text style={[T.small, { width: 26 }]}>{i + 1}.</Text>
+                      <Text style={[T.body, { flex: 1, fontSize: 14 }]}>{it.name}</Text>
+                      <Text style={[T.small, T.num, { marginLeft: 8 }]}>{known(it).kcal ? fmt(it.kcal!) : '—'}</Text>
+                    </View>
+                  </View>
+                ))}
+                <Btn label="Взять на этот день" icon="plus" onPress={() => { store.attachMenu(m.id, date); onTaken(m.id); }} style={{ marginTop: 12, paddingVertical: 14 }} />
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+      {!showAll && all.length > list.length ? <ActBtn label={`Показать все (${all.length})`} icon="list" onPress={onAll} style={{ flex: 0, marginTop: 4 }} /> : null}
+    </View>
+  );
+}
+
+/** Плавающая панель инструментов меню (вместо поля «Что вы съели?»). */
+function MenuToolbar({ bottom, hidden, menu, onUpload, onManual, onPast, onEdit, onDone, onDetach, onDelete }: {
+  bottom: number; hidden: boolean; menu?: Menu; onUpload: () => void; onManual: () => void; onPast: () => void;
+  onEdit: () => void; onDone: () => void; onDetach: () => void; onDelete: () => void;
+}) {
+  if (hidden) return null;
+  const Tool = ({ icon, label, on, danger, flex = 1, iconOnly }: { icon: any; label: string; on: () => void; danger?: boolean; flex?: number; iconOnly?: boolean }) => (
+    <Pressable onPress={on} accessibilityLabel={label} style={({ pressed }) => [st.tool, { flex }, danger && { backgroundColor: C.overSoft }, pressed && { opacity: 0.6 }]}>
+      <Icon name={icon} size={21} color={danger ? C.over : C.accent} />
+      {iconOnly ? null : <Text style={{ fontSize: 11.5, fontWeight: '600', marginTop: 2, color: danger ? C.over : C.accent, textAlign: 'center' }} numberOfLines={2}>{label}</Text>}
+    </Pressable>
+  );
+  return (
+    <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom }}>
+      <View style={[st.toolbar, { padding: 6, gap: 6 }]}>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <Tool icon="camera" label="Загрузить" on={onUpload} />
+          <Tool icon="pen" label="Вручную" on={onManual} />
+          <Tool icon="calendar" label="Из прошлых" on={onPast} />
+        </View>
+        {menu ? (
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <Tool icon="edit" label="Изменить" on={onEdit} />
+            <Tool icon="check" label={menu.done ? 'Вернуть в список' : 'Съедено полностью'} on={onDone} flex={1.5} />
+            <Tool icon="close" label="Убрать из дня" on={onDetach} />
+            <Tool icon="trash" label="Удалить меню" on={onDelete} danger iconOnly flex={0.6} />
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}

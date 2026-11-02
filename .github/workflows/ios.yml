@@ -1,0 +1,32 @@
+# Сборка неподписанного .ipa для iPhone на облачном Mac GitHub (без своего Mac).
+# Запуск: вкладка Actions → "iOS .ipa" → Run workflow. Готовый файл — в Artifacts.
+# Установка на iPhone: Sideloadly (sideloadly.io) с вашим бесплатным Apple ID
+# (с бесплатным Apple ID приложение нужно переподписывать раз в 7 дней).
+name: iOS .ipa
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx expo prebuild --platform ios --no-install
+      - run: cd ios && pod install
+      - name: Build
+        run: |
+          WS=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WS" .xcworkspace)
+          xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/*.app Payload/
+          zip -qr Hrum-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hrum-ios
+          path: Hrum-unsigned.ipa
