@@ -3,10 +3,28 @@ import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, 
 import { C, T } from '../theme';
 import { ChatMsg } from '../types';
 import { Icon } from '../ui/Icon';
+import { parseMarkdown } from '../markdown';
 import { ASK_HINT_MS, ASK_HINTS, nextAskHint } from '../chat';
 import { ChatApi } from './useChat';
 
 const hhmm = (t: number) => { const d = new Date(t); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+const body = [T.body, { fontSize: 14.5, lineHeight: 20 }];
+/** Ответ ИИ с лёгким markdown: жирный, списки, абзацы. */
+function RichText({ text }: { text: string }) {
+  return (
+    <View>
+      {parseMarkdown(text).map((b, i) => b.kind === 'gap' ? <View key={i} style={{ height: 6 }} /> : (
+        <View key={i} style={b.kind === 'li' ? { flexDirection: 'row', paddingLeft: 2, marginTop: 2 } : undefined}>
+          {b.kind === 'li' ? <Text style={[...body, { width: b.marker === '•' ? 16 : 22, color: C.accentDark }]}>{b.marker}</Text> : null}
+          <Text selectable style={[...body, b.kind === 'li' && { flex: 1 }]}>
+            {b.spans.map((sp, j) => <Text key={j} style={sp.bold ? { fontWeight: '700' } : undefined}>{sp.text}</Text>)}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 export function Bubble({ m }: { m: ChatMsg }) {
   const mine = m.role === 'user';
@@ -17,7 +35,9 @@ export function Bubble({ m }: { m: ChatMsg }) {
           {m.photos.map((u, i) => <Image key={i} source={{ uri: u }} accessibilityLabel="Фото к вопросу" style={s.photo} />)}
         </View>
       ) : null}
-      <Text selectable style={[T.body, { fontSize: 14.5, lineHeight: 20 }, mine && { color: C.white }, m.error && { color: C.over }]}>{m.text}</Text>
+      {mine || m.error ? (
+        <Text selectable style={[T.body, { fontSize: 14.5, lineHeight: 20 }, mine && { color: C.white }, m.error && { color: C.over }]}>{m.text}</Text>
+      ) : <RichText text={m.text} />}
       <Text style={[T.small, { fontSize: 11, marginTop: 3, textAlign: mine ? 'right' : 'left' }, mine && { color: '#D6E8DC' }]}>{hhmm(m.at)}</Text>
     </View>
   );

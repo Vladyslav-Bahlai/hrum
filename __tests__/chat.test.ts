@@ -109,7 +109,8 @@ describe('buildChatContext', () => {
     expect(t).toContain('осталась ½');
     expect(t).toContain('Рыба — 400 ккал');
     expect(t).toContain('не тронуто');
-    expect(t).toContain('закрыто');
+    expect(t).not.toContain('закрыто');
+    expect(t).not.toContain('Салат');
     expect(t).not.toContain('Чужое меню');
   });
   test('если меню нет — так и сказано', () => {

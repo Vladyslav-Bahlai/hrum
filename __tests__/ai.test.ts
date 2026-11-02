@@ -227,3 +227,44 @@ describe('чат: chatWithAI (замоканный fetch)', () => {
     await assertion;
   });
 });
+
+describe('ответ чата: рассуждения, перегрузка', () => {
+  const A = require('../src/ai');
+  test('stripReasoning: отрезает черновик, оставляет итог', () => {
+    const raw = 'Пользователь пишет: «что съесть». Посмотрим на актуальные данные.\nНужно посоветовать ужин.\nНапишем короткий ответ.\n\nНа ужин возьмите рыбу с рисом — это уложится в остаток калорий.';
+    expect(A.stripReasoning(raw)).toBe('На ужин возьмите рыбу с рисом — это уложится в остаток калорий.');
+  });
+  test('stripReasoning: обычный ответ и неуверенные случаи не трогает', () => {
+    const ok1 = 'Съешьте творог с ягодами — белок и мало калорий.';
+    expect(A.stripReasoning(ok1)).toBe(ok1);
+    const only = 'Пользователь пишет: привет. Нужно посоветовать.';
+    expect(A.stripReasoning(only)).toBe(only);
+  });
+  test('geminiThinking по моделям', () => {
+    expect(A.geminiThinking('gemini-2.5-flash')).toEqual({ thinkingBudget: 0 });
+    expect(A.geminiThinking('gemini-2.5-pro')).toEqual({ thinkingBudget: 128 });
+    expect(A.geminiThinking('gemini-3-flash-preview')).toEqual({ thinkingLevel: 'low' });
+    expect(A.geminiThinking('gemini-1.5-flash')).toBeUndefined();
+  });
+  test('Gemini чат: thought-части отбрасываются, thinkingConfig задан, итог без рассуждений', async () => {
+    const f = jest.fn().mockResolvedValue(ok({ candidates: [{ content: { parts: [{ text: 'Пользователь пишет…', thought: true }, { text: 'Съешьте творог.' }] } }] }));
+    (globalThis as any).fetch = f;
+    const r = await A.chatWithAI({ provider: 'gemini', geminiModel: 'gemini-2.5-flash', claudeModel: 'c' }, 'K', [{ role: 'user', text: 'что съесть?' }], 'ctx');
+    expect(r).toBe('Съешьте творог.');
+    const body = JSON.parse(f.mock.calls[0][1].body);
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+    expect(JSON.stringify(body)).not.toContain('includeThoughts');
+    expect(body.system_instruction.parts[0].text).toMatch(/ассуждений вслух/);
+  });
+  test('Claude чат: thinking-блоки игнорируются', async () => {
+    const f = jest.fn().mockResolvedValue(ok({ content: [{ type: 'thinking', thinking: 'мысли' }, { type: 'text', text: 'Готовый ответ.' }] }));
+    (globalThis as any).fetch = f;
+    expect(await A.chatWithAI({ provider: 'claude', geminiModel: 'g', claudeModel: 'claude-x' }, 'K', [{ role: 'user', text: 'привет' }], 'ctx')).toBe('Готовый ответ.');
+  });
+  test('перегрузка: 503 и английский текст → дружелюбное сообщение', async () => {
+    expect(A.friendlyError(new Error('This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.'), false).message).toBe('Сервис ИИ перегружен, попробуйте позже.');
+    (globalThis as any).fetch = jest.fn().mockResolvedValue(fail(503, 'The model is overloaded'));
+    await expect(A.chatWithAI({ provider: 'gemini', geminiModel: 'gemini-2.5-flash', claudeModel: 'c' }, 'K', [{ role: 'user', text: 'привет' }], 'ctx')).rejects.toThrow('Сервис ИИ перегружен');
+  });
+});
+

@@ -83,12 +83,12 @@ const menuBlock = (menus: Menu[], entries: Entry[], date: string) => {
   const out: string[] = [];
   for (const m of menus) {
     const eaten = eatenByName(entries, date, m.id);
-    const lines = m.items.map((it, i) => {
-      const ds = dishState(eaten[it.name] || 0, isClosed(m, it.name));
-      const state = ds.kind === 'none' ? 'не тронуто' : ds.kind === 'closed' ? 'закрыто (не буду/съедено)' : ds.label;
-      return `  ${i + 1}. ${it.section ? `[${it.section}] ` : ''}${it.name} — ${kcalText(it)}${known(it).protein ? ', ' + macros(nut(it)) : ''} · ${state}`;
+    // закрытые блюда ИИ не отправляем вовсе (нечего советовать); съеденные полностью и остатки остаются
+    const lines = m.items.filter((it) => !isClosed(m, it.name)).map((it, i) => {
+      const ds = dishState(eaten[it.name] || 0, false);
+      return `  ${i + 1}. ${it.section ? `[${it.section}] ` : ''}${it.name} — ${kcalText(it)}${known(it).protein ? ', ' + macros(nut(it)) : ''} · ${ds.kind === 'none' ? 'не тронуто' : ds.label}`;
     });
-    out.push(`«${m.title}»:\n${lines.join('\n')}`);
+    out.push(`«${m.title}»:\n${lines.length ? lines.join('\n') : '  (все блюда закрыты)'}`);
   }
   return out.join('\n');
 };

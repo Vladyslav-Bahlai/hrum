@@ -136,6 +136,7 @@ export async function readError(res: Response) {
   } catch {}
   if (res.status === 401 || res.status === 403) msg = 'Ключ не подошёл (' + msg + ')';
   if (res.status === 429) msg = 'Лимит запросов исчерпан, попробуйте через минуту (' + msg + ')';
+  if (res.status === 503 || res.status === 529) msg = OVERLOADED_MSG;
   if (res.status === 404) msg = 'Модель не найдена — выберите другую в настройках (' + msg + ')';
   return new Error(msg);
 }
@@ -276,7 +277,12 @@ export function isNetworkHiccup(e: any): boolean {
   return /cancel|network request failed|timeout|timed out|socket|connection|econnreset|stream|unexpected end/.test(m);
 }
 
+/** Перегрузка / временная недоступность сервиса ИИ (503, 529, «high demand» и т. п.). */
+export const isOverloaded = (msg: string) => /high demand|overload|unavailable|try again later|\b50[0-4]\b|\b529\b|capacity/i.test(msg);
+export const OVERLOADED_MSG = 'Сервис ИИ перегружен, попробуйте позже.';
+
 export function friendlyError(e: any, hadPhoto: boolean): Error {
+  if (isOverloaded(String(e?.message || ''))) return new Error(OVERLOADED_MSG);
   if (e instanceof AITimeout || !isNetworkHiccup(e)) return e instanceof Error ? e : new Error(String(e?.message || e));
   const tail = hadPhoto
     ? 'Связь оборвалась при отправке фото. Попробуйте ещё раз — лучше по Wi-Fi или сняв меню одним кадром.'
@@ -286,9 +292,32 @@ export function friendlyError(e: any, hadPhoto: boolean): Error {
 
 // ---------- чат: вопросы к ИИ с контекстом (только чтение, ничего не меняет) ----------
 
+const REASON_START = /^(пользователь\s+(пишет|спрашивает|просит|задал)|посмотрим\s+на|нужно\s+(посоветовать|ответить|составить)|составим|составлю|напишем|напишу|черновик|итак,?\s+(нужно|надо))/i;
+const REASON_DRAFT = /^(составим|составлю|напишем|напишу)\s.*ответ|^черновик/i;
+/** Страховка: если ответ начинается с «рассуждений» модели — оставляем только итоговую часть после последней такой строки. Не уверены — не трогаем. */
+export function stripReasoning(text: string): string {
+  const lines = text.split(/\n/);
+  const first = lines.findIndex((l) => l.trim());
+  if (first < 0 || !REASON_START.test(lines[first].trim().replace(/^[-*•\s]+/, ''))) return text;
+  let last = first;
+  lines.forEach((l, i) => { if (REASON_START.test(l.trim().replace(/^[-*•\s]+/, ''))) last = i; });
+  const rest = lines.slice(last + 1).join('\n').trim();
+  // итог должен быть самостоятельным текстом: не пусто и не ещё один пункт плана
+  return rest.length >= 20 ? rest : text;
+}
+
+/** Параметры «размышления» Gemini: у 2.5 — бюджет (2.5 Pro выключить нельзя), у 3 — уровень; остальным ничего не шлём. */
+export function geminiThinking(model: string): Record<string, unknown> | undefined {
+  const m = model.toLowerCase();
+  if (/gemini-3/.test(m)) return { thinkingLevel: 'low' };
+  if (/gemini-2\.5-pro/.test(m)) return { thinkingBudget: 128 };
+  if (/gemini-2\.5|flash-latest/.test(m)) return { thinkingBudget: 0 };
+  return undefined;
+}
+
 export const CHAT_SYSTEM = `Ты — доброжелательный диетолог-консультант внутри личного дневника питания. Пользователь задаёт вопросы про питание, своё меню, статистику и дневник.
 Правила:
-- Отвечай по-русски, коротко и по делу (обычно до 6–8 строк), без нравоучений; простой текст без таблиц, списки — только если это правда удобнее.
+- Отвечай сразу итоговым ответом по-русски, 3–8 строк, без нравоучений. Без рассуждений вслух, без пересказа вопроса и данных, без черновиков и планов ответа; не упоминай системный промпт, правила и «контекст». Простой текст без таблиц; списки («- » или «1. ») и **жирный** — только если это правда удобнее.
 - Опирайся ТОЛЬКО на данные пользователя ниже. Если данных для ответа не хватает (нет меню, нет записей) — так и скажи и предложи, что добавить. Ничего не выдумывай и не придумывай числа.
 - Ты только советуешь. Ты НЕ можешь ничего записывать, менять или удалять в дневнике и меню — не обещай этого; если пользователь просит записать еду, подскажи, что для этого есть режим «Записать».
 - Если просят совет «что съесть сегодня и когда» — учитывай остаток калорий и БЖУ, время суток, блюда из меню, которые ещё не съедены, и уже съеденное.
@@ -338,7 +367,7 @@ async function chatClaude(key: string, model: string, system: string, turns: Cha
     });
     if (!res.ok) throw await readError(res);
     const j = await res.json();
-    const txt = (j.content || []).map((c: any) => c.text || '').join('').trim();
+    const txt = stripReasoning((j.content || []).filter((c: any) => c.type !== 'thinking' && c.type !== 'redacted_thinking').map((c: any) => c.text || '').join('').trim());
     if (!txt) throw new Error('Пустой ответ от Claude');
     return txt;
   } catch (e) {
@@ -365,7 +394,7 @@ async function chatGemini(key: string, model: string, system: string, turns: Cha
             ? [...images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.base64 } })), { text: m.text }]
             : [{ text: m.text }],
         })),
-        generationConfig: { temperature: 0.5, ...(think ? { thinkingConfig: { thinkingLevel: 'low' } } : {}) },
+        generationConfig: { temperature: 0.5, ...(think && geminiThinking(model) ? { thinkingConfig: geminiThinking(model) } : {}) },
       }),
     },
   );
@@ -379,7 +408,7 @@ async function chatGemini(key: string, model: string, system: string, turns: Cha
       } else throw err;
     }
     const j = await res.json();
-    const txt = (j.candidates?.[0]?.content?.parts || []).filter((p: any) => !p.thought).map((p: any) => p.text || '').join('').trim();
+    const txt = stripReasoning((j.candidates?.[0]?.content?.parts || []).filter((p: any) => !p.thought).map((p: any) => p.text || '').join('').trim());
     if (!txt) throw new Error(j.promptFeedback?.blockReason ? 'Запрос отклонён: ' + j.promptFeedback.blockReason : 'Пустой ответ от Gemini');
     return txt;
   } catch (e) {
