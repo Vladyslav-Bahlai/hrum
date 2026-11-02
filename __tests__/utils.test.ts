@@ -203,13 +203,9 @@ describe('меню: остатки и закрытые блюда', () => {
     const s = carouselSlides([m], [], '2026-11-02');
     expect(s.map((x) => x.item.name)).toEqual(['Суп', 'Каша']);
   });
-  test('carouselSlides: при нескольких меню порядок перемешивается (управляемый rng)', () => {
+  test('carouselSlides: блюда всех меню дня подряд', () => {
     const m2 = menu('m2', ['2026-11-02'], [item('Рыба'), item('Рис')]);
-    const seq = [0, 0, 0]; let i = 0;
-    const a = carouselSlides([m, m2], [], '2026-11-02', () => seq[i++ % 3]);
-    const names = a.map((x) => x.item.name).sort();
-    expect(names).toEqual(['Каша', 'Рис', 'Рыба', 'Суп']);
-    // у одного меню порядок исходный
-    expect(carouselSlides([m2], [], '2026-11-02', () => 0).map((x) => x.item.name)).toEqual(['Рыба', 'Рис']);
+    const names = carouselSlides([m, m2], [], '2026-11-02').map((x) => x.item.name);
+    expect(names.sort()).toEqual(['Каша', 'Рис', 'Рыба', 'Суп']);
   });
 });

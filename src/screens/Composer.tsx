@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { C, noOutline, T } from '../theme';
 import { Icon } from '../ui/Icon';
 import { fromCamera, fromGallery, Picked } from '../media';
@@ -91,10 +91,6 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
 
   // ---- подъём над клавиатурой (Android в edge-to-edge окно не ужимает) ----
   const kb = useKeyboardHeight();
-  const lift = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(lift, { toValue: kb, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: false }).start();
-  }, [kb]); // eslint-disable-line react-hooks/exhaustive-deps
   const baseBottom = kb > 0 ? 8 : Math.max(bottomInset, 12);
 
   const add = async (src: 'camera' | 'gallery') => {
@@ -167,7 +163,7 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
     <>
       {/* тап по ленте: свернуть (или только убрать клавиатуру, если что-то введено) */}
       {mounted && open && chatView !== 'full' ? <Pressable accessibilityLabel="Свернуть панель" onPress={outside} style={StyleSheet.absoluteFill} /> : null}
-      <Animated.View pointerEvents="box-none" style={[s.wrap, { bottom: Animated.add(lift, baseBottom) }]}>
+      <Animated.View pointerEvents="box-none" style={[s.wrap, { bottom: kb + baseBottom }]}>
         {/* большая зелёная кнопка */}
         <Animated.View pointerEvents={open ? 'none' : 'box-none'} style={[s.fabWrap, fabStyle]}>
           <Pressable accessibilityLabel="Добавить еду" onPress={expand} style={({ pressed }) => [s.fab, pressed && { transform: [{ scale: 0.94 }] }]}>
@@ -246,7 +242,7 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
                     placeholder={ask ? (hintOn ? '' : photos.length ? 'Вопрос к фото (можно без текста)…' : 'Спросить ИИ…') : photos.length ? 'Уточните, если нужно…' : 'Что вы съели?'}
                     placeholderTextColor={C.muted}
                     multiline
-                    numberOfLines={1}
+                    numberOfLines={Platform.OS === 'web' ? 1 : undefined}
                     style={[T.body, s.input, noOutline]}
                   />
                   {hintOn ? <AskHint hint={hint} /> : null}
@@ -277,17 +273,17 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
             </Animated.View>
           </Animated.View>
         ) : null}
-        {mounted && open && ask && chatView === 'full' ? (
-          <View onTouchStart={() => setBump((x) => x + 1)} style={{ position: 'absolute', left: 0, right: 0, bottom: panelH, height: Math.max(180, winH - chatTop - (baseBottom + kb + panelH)) }}>
-            <ChatScreen chat={chat} style={{ top: 0, bottom: 0 }} onMinimize={() => { Keyboard.dismiss(); setChatView('mini'); }} onClose={closeChat} />
-          </View>
-        ) : null}
         <ModelSheet visible={modelOpen} onClose={() => setModelOpen(false)} />
         <AttachSheet visible={attachOpen} onClose={() => setAttachOpen(false)} tiles={[
           { key: 'camera', label: 'Камера', icon: 'camera', onPress: () => { void add('camera'); } },
           { key: 'gallery', label: 'Галерея', icon: 'image', onPress: () => { void add('gallery'); } },
         ]} />
       </Animated.View>
+      {mounted && open && ask && chatView === 'full' ? (
+        <View onTouchStart={() => setBump((x) => x + 1)} style={{ position: 'absolute', left: 0, right: 0, top: chatTop, bottom: baseBottom + kb + panelH }}>
+          <ChatScreen chat={chat} style={{ top: 0, bottom: 0 }} onMinimize={() => { Keyboard.dismiss(); setChatView('mini'); }} onClose={closeChat} />
+        </View>
+      ) : null}
     </>
   );
 }
@@ -382,7 +378,7 @@ const s = StyleSheet.create({
     shadowColor: '#0F2A1C', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
   barFocus: { borderColor: C.accent, borderWidth: 1.5, borderRadius: 24, shadowOpacity: 0.2 },
-  input: { minHeight: 44, maxHeight: 104, paddingHorizontal: 8, paddingTop: 11, paddingBottom: 11 },
+  input: { minHeight: 44, maxHeight: 132, paddingHorizontal: 8, paddingTop: 11, paddingBottom: 11 },
   thumb: { width: 58, height: 58, borderRadius: 12, backgroundColor: C.line },
   thumbX: { position: 'absolute', top: -5, right: -5, width: 20, height: 20, borderRadius: 10, backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center' },
   quick: {

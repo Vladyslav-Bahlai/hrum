@@ -71,7 +71,9 @@ export function DayScreen() {
   const setNoSwipe = useRef((r: { y: number; h: number } | null) => { noSwipe.current = r; }).current;
   const [composing, setComposing] = useState(false); // панель ввода раскрыта — карточка «Выбрать с меню» плавно прячется
   // карточка схлопывается сразу и резко (высота + прозрачность), не дожидаясь анимации панели
-  const onComposerOpen = useRef((o: boolean) => { LayoutAnimation.configureNext(LayoutAnimation.create(170, 'easeInEaseOut', 'opacity')); setComposing(o); }).current;
+  // карточка только гаснет и не принимает касаний, высота остаётся — позиция прокрутки дня не меняется
+  const cardOp = useRef(new Animated.Value(1)).current;
+  const onComposerOpen = useRef((o: boolean) => { setComposing(o); Animated.timing(cardOp, { toValue: o ? 0 : 1, duration: 170, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(); }).current;
   const chatOpen = useRef(false); // полноэкранный чат открыт — день не листается
   const onChatOpen = useRef((o: boolean) => { chatOpen.current = o; }).current;
   const settle = () => Animated.spring(slide, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 0 }).start();
@@ -332,7 +334,7 @@ export function DayScreen() {
           </View>
 
           {/* выбор блюда из меню дня */}
-          {!composing ? (
+          <Animated.View pointerEvents={composing ? 'none' : 'auto'} style={{ opacity: cardOp }}>
           <Pressable onPress={chooseFromMenu} style={({ pressed }) => [st.next, pressed && { opacity: 0.75 }]}>
             <View style={{ flex: 1 }}>
               <Text style={T.h3}>Выбрать с меню</Text>
@@ -345,7 +347,7 @@ export function DayScreen() {
             </View>
             <View style={st.nextPlus}><Icon name={dayMenus.length ? 'list' : 'plus'} size={26} color={C.white} stroke={2.2} /></View>
           </Pressable>
-          ) : null}
+          </Animated.View>
 
           {/* приёмы пищи */}
           {entries.length === 0 ? (

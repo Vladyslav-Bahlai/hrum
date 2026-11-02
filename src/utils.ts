@@ -279,12 +279,9 @@ export const menuLeftCount = (menus: { id: string; items: FoodItem[]; closed?: s
   menus.reduce((n, m) => n + restItems(m, eatenByName(entries, date, m.id)).length, 0);
 
 export interface AdSlide { menuId: string; menuTitle: string; item: FoodItem }
-/** Блюда для «рекламной» карусели: несъеденные и незакрытые; при нескольких меню порядок перемешан. */
-export const carouselSlides = (menus: { id: string; title: string; items: FoodItem[]; closed?: string[] }[], entries: Entry[], date: string, rng: () => number = Math.random): AdSlide[] => {
+/** Блюда для «рекламной» карусели: несъеденные и незакрытые; из всех меню дня (порядок исходный; «колоду» тасует карусель). */
+export const carouselSlides = (menus: { id: string; title: string; items: FoodItem[]; closed?: string[] }[], entries: Entry[], date: string): AdSlide[] => {
   const out: AdSlide[] = [];
   for (const m of menus) for (const item of restItems(m, eatenByName(entries, date, m.id))) out.push({ menuId: m.id, menuTitle: m.title, item });
-  if (menus.length > 1) {
-    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
-  }
   return out;
 };

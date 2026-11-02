@@ -178,6 +178,25 @@ export const nextSlide = (len: number, cur: number, random: boolean, rng: () => 
   return n;
 };
 
+/** Перемешанная копия (Фишер—Йетс). */
+export const shuffle = <T,>(arr: readonly T[], rng: () => number = Math.random): T[] => {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+};
+/** Новая «колода»: порядок индексов 0..len-1; первый не равен `avoidFirst` (последнему блюду прошлого круга). */
+export const newDeck = (len: number, avoidFirst = -1, rng: () => number = Math.random): number[] => {
+  const d = shuffle(Array.from({ length: len }, (_, i) => i), rng);
+  if (len > 1 && d[0] === avoidFirst) { const j = 1 + Math.floor(rng() * (len - 1)); [d[0], d[j]] = [d[j], d[0]]; }
+  return d;
+};
+/** Шаг колоды: следующая карта; в конце круга колода тасуется заново (без повтора последней карты первой). */
+export const deckStep = (deck: { order: number[]; pos: number }, rng: () => number = Math.random) => {
+  const len = deck.order.length;
+  if (deck.pos + 1 < len) return { order: deck.order, pos: deck.pos + 1 };
+  return { order: newDeck(len, deck.order[len - 1], rng), pos: 0 };
+};
+
 /** Метка времени записи после правки времени: если минуты не менялись — прежняя (порядок записей внутри минуты не ломается). */
 export const entryTimestamp = (prevTs: number, date: string, minutes: number) => (minutes === minutesOf(prevTs) ? prevTs : timestampAt(date, minutes));
 

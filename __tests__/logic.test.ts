@@ -369,3 +369,36 @@ describe('панель «+»: что видно', () => {
   });
 });
 
+describe('колода блюд карусели', () => {
+  const seeded = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  test('shuffle: все элементы на месте, исходный массив не меняется', () => {
+    const src = [1, 2, 3, 4, 5]; const r = L.shuffle(src, seeded(7));
+    expect([...r].sort()).toEqual(src); expect(src).toEqual([1, 2, 3, 4, 5]);
+  });
+  test('newDeck: перестановка без повторов, первый не равен avoidFirst', () => {
+    for (let sd = 1; sd < 60; sd++) for (const len of [2, 3, 5, 8]) for (const av of [-1, 0, len - 1]) {
+      const d = L.newDeck(len, av, seeded(sd));
+      expect([...d].sort((a, b) => a - b)).toEqual(Array.from({ length: len }, (_, i) => i));
+      if (av >= 0) expect(d[0]).not.toBe(av);
+    }
+    expect(L.newDeck(1, 0)).toEqual([0]);
+    expect(L.newDeck(0)).toEqual([]);
+  });
+  test('deckStep: круг без повторов, все блюда, на границе — новая колода без повтора последнего', () => {
+    const rng = seeded(3); const len = 6;
+    let deck = { order: L.newDeck(len, -1, rng), pos: 0 };
+    for (let lap = 0; lap < 20; lap++) {
+      const seen: number[] = [deck.order[deck.pos]];
+      const last = deck.order[len - 1];
+      for (let k = 1; k < len; k++) { deck = L.deckStep(deck, rng); seen.push(deck.order[deck.pos]); }
+      expect(new Set(seen).size).toBe(len);
+      deck = L.deckStep(deck, rng); // граница круга
+      expect(deck.pos).toBe(0);
+      expect(deck.order[0]).not.toBe(last);
+    }
+  });
+  test('одно блюдо — колода остаётся на нём', () => {
+    expect(L.deckStep({ order: [0], pos: 0 })).toEqual({ order: [0], pos: 0 });
+  });
+});
+
