@@ -23,40 +23,16 @@ appId: com.hrum.diary
     accessibilityLabel: "Свернуть"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/03-after-keyboard
-# 2) чат в дневнике: переключить в «Спросить», отправить, прокрутить
+# 2) режим «Спросить» — переключить и снять, не отправляя (нет ключа API в CI)
 - tapOn:
     id: "fab"
 - waitForAnimationToEnd
 - tapOn: "Спросить"
 - waitForAnimationToEnd
+- takeScreenshot: ${OUT}/04-ask-mode
 - tapOn:
-    id: "composer-input"
-- inputText: "Что полезнее есть на завтрак?"
+    accessibilityLabel: "Свернуть"
 - waitForAnimationToEnd
-- tapOn:
-    accessibilityLabel: "Отправить"
-- waitForAnimationToEnd
-- takeScreenshot: ${OUT}/04-chat-full
-- swipe:
-    start: 50%, 30%
-    end: 50%, 70%
-    duration: 400
-- waitForAnimationToEnd
-- takeScreenshot: ${OUT}/05-chat-scrolled-up
-- swipe:
-    start: 50%, 30%
-    end: 10%, 30%
-    duration: 300
-- waitForAnimationToEnd
-- takeScreenshot: ${OUT}/06-chat-hswipe-no-day-change
-- tapOn:
-    text: "Свернуть чат"
-    optional: true
-- waitForAnimationToEnd
-- takeScreenshot: ${OUT}/07-chat-mini
-- tapOn:
-    text: "Закрыть чат"
-    optional: true
 # 3) меню: свайп по таблеткам меню не должен листать день
 - tapOn: "Меню"
 - waitForAnimationToEnd
