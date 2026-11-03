@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import { Animated, Pressable, View } from 'react-native';
+import { Text } from './RNText';
 import { C } from '../theme';
 
 interface ToastOpts { text: string; action?: string; onAction?: () => void; onExpire?: () => void }

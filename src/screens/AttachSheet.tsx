@@ -1,5 +1,6 @@
 import React from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
 import { Icon, IconName } from '../ui/Icon';
 import { Sheet } from '../ui/kit';

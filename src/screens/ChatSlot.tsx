@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
 import { ChatMsg } from '../types';
 import { Icon } from '../ui/Icon';
@@ -11,7 +12,7 @@ const hhmm = (t: number) => { const d = new Date(t); return `${d.getHours()}:${S
 
 const body = [T.body, { fontSize: 14.5, lineHeight: 20 }];
 /** Ответ ИИ с лёгким markdown: жирный, списки, абзацы. */
-function RichText({ text }: { text: string }) {
+export function RichText({ text }: { text: string }) {
   return (
     <View>
       {parseMarkdown(text).map((b, i) => b.kind === 'gap' ? <View key={i} style={{ height: 6 }} /> : (

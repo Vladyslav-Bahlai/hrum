@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Animated, Easing, PanResponder, Pressable, Text, View } from 'react-native';
+import { Animated, Easing, PanResponder, Pressable, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
 import { ActBtn, IconBtn, Sheet } from '../ui/kit';
 import { useStore } from '../store';

@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
 import { AdSlide, fmt, known } from '../utils';
 import { AD_MS, deckStep, newDeck } from '../logic';
+import { DishIcon } from '../ui/DishIcon';
 
 export { AD_MS };
 const FADE_MS = 400;
@@ -12,7 +14,7 @@ function Row({ sl, multi }: { sl: AdSlide; multi: boolean }) {
   const k = known(it);
   return (
     <>
-      <Text style={s.emoji}>{it.emoji || '🍽️'}</Text>
+      <DishIcon name={it.name} emoji={it.emoji} en={it.en} size={36} where="carousel" />
       <View style={{ flex: 1 }}>
         <Text style={[T.body, { fontWeight: '700', color: C.accentDark }]} numberOfLines={1}>{it.name}</Text>
         <Text style={T.small} numberOfLines={1}>

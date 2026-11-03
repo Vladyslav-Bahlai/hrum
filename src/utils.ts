@@ -73,7 +73,10 @@ export const PORTIONS: { v: number; label: string }[] = [
   { v: 0.25, label: '¼' },
   { v: 1 / 3, label: '⅓' },
   { v: 0.5, label: '½' },
+  { v: 2 / 3, label: '⅔' },
+  { v: 0.75, label: '¾' },
   { v: 1, label: '1' },
+  { v: 1.25, label: '1¼' },
   { v: 1.5, label: '1½' },
   { v: 2, label: '2' },
 ];

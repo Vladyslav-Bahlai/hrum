@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import { AppData } from './types';
+import { DEMO, demoData } from './demo';
 
 /**
  * Все данные хранятся локально на телефоне, в папке приложения:
@@ -24,6 +25,8 @@ function ensureDirs() {
 }
 
 export async function loadData(): Promise<Partial<AppData> | null> {
+  // CI-сборка с демо-данными (EXPO_PUBLIC_DEMO=1): каждый запуск — с чистыми демо-данными
+  if (DEMO) return demoData();
   try {
     if (isWeb) {
       const s = globalThis.localStorage?.getItem('hrum-data');
@@ -133,3 +136,70 @@ export function importSound(ev: string, srcUri: string, name?: string): string {
   new File(srcUri).copy(dest);
   return dest.uri;
 }
+
+/** Постоянный кэш SVG иконок Iconify: <cache>/Hrum-icons/<prefix>__<name>.svg; на вебе — localStorage (ограниченно). */
+export const iconSvgStore = {
+  async get(icon: string): Promise<string | undefined> {
+    try {
+      if (isWeb) return globalThis.localStorage?.getItem('hrum-icon:' + icon) || undefined;
+      const f = new File(new Directory(Paths.cache, 'Hrum-icons'), icon.replace(':', '__') + '.svg');
+      return f.exists ? await f.text() : undefined;
+    } catch { return undefined; }
+  },
+  async set(icon: string, svg: string): Promise<void> {
+    try {
+      if (isWeb) {
+        const ls = globalThis.localStorage;
+        if (!ls) return;
+        // не больше ~300 иконок на вебе
+        const keys = Object.keys(ls).filter((k) => k.startsWith('hrum-icon:'));
+        if (keys.length > 300) keys.slice(0, 50).forEach((k) => ls.removeItem(k));
+        ls.setItem('hrum-icon:' + icon, svg);
+        return;
+      }
+      const d = new Directory(Paths.cache, 'Hrum-icons');
+      if (!d.exists) d.create({ intermediates: true, idempotent: true });
+      const f = new File(d, icon.replace(':', '__') + '.svg');
+      f.write(svg);
+    } catch {}
+  },
+};
+
+/** Офлайн-паки иконок: <documents>/Hrum/iconpacks/<prefix>.json; на вебе — localStorage (если влезет), иначе ошибка. */
+const packMem = new Map<string, any>();
+export const packStore = {
+  memory: (prefix: string) => packMem.get(prefix),
+  async load(prefix: string): Promise<any | undefined> {
+    if (packMem.has(prefix)) return packMem.get(prefix);
+    try {
+      let txt: string | undefined;
+      if (isWeb) txt = globalThis.localStorage?.getItem('hrum-pack:' + prefix) || undefined;
+      else {
+        const f = new File(new Directory(root(), 'iconpacks'), prefix + '.json');
+        txt = f.exists ? await f.text() : undefined;
+      }
+      if (!txt) return undefined;
+      const j = JSON.parse(txt);
+      packMem.set(prefix, j);
+      return j;
+    } catch { return undefined; }
+  },
+  async save(prefix: string, json: any): Promise<void> {
+    const txt = JSON.stringify(json);
+    if (isWeb) {
+      try { globalThis.localStorage?.setItem('hrum-pack:' + prefix, txt); } catch { throw new Error('В браузере не хватает места для этого пака'); }
+    } else {
+      const d = new Directory(root(), 'iconpacks');
+      if (!d.exists) d.create({ intermediates: true, idempotent: true });
+      new File(d, prefix + '.json').write(txt);
+    }
+    packMem.set(prefix, json);
+  },
+  async remove(prefix: string): Promise<void> {
+    packMem.delete(prefix);
+    try {
+      if (isWeb) globalThis.localStorage?.removeItem('hrum-pack:' + prefix);
+      else { const f = new File(new Directory(root(), 'iconpacks'), prefix + '.json'); if (f.exists) f.delete(); }
+    } catch {}
+  },
+};

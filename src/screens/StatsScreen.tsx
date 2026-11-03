@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
 import { ActBtn, Btn, Hair, NumField, Seg, Sheet, Unk } from '../ui/kit';
 import { Icon } from '../ui/Icon';
 import { DayBars, Legend, LineChart, SplitBar } from '../ui/charts';
 import { useStore } from '../store';
 import { Entry } from '../types';
+import { dayTarget } from '../logic';
 import { addDays, fmt, fromKey, hasAnyMacros, known, kcalOf, getMeals, nut, r0, r1, shortDate, sum, todayKey, WD_SHORT, plural } from '../utils';
 
 type Period = 7 | 30 | 90;
@@ -33,6 +35,7 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
         label: period === 7 ? WD_SHORT[fromKey(k).getDay()] : String(fromKey(k).getDate()),
         value: t?.kcal || 0,
         unk: t?.unk.kcal || 0,
+        target: dayTarget(data, k).kcal,
         cnt: t?.count || 0,
       };
     });
@@ -42,8 +45,8 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
     const n = logged.length || 1;
     const all = Object.values(byDay).flat();
     const tot = sum(all);
-    const inNorm = full.filter((d) => d.value >= tg.kcal * 0.85 && d.value <= tg.kcal * 1.05).length;
-    const over = full.filter((d) => d.value > tg.kcal * 1.05).length;
+    const inNorm = full.filter((d) => d.value >= d.target * 0.85 && d.value <= d.target * 1.05).length;
+    const over = full.filter((d) => d.value > d.target * 1.05).length;
 
     // по приёмам пищи
     const meals = getMeals().map((m) => { const t = sum(all.filter((e) => e.meal === m.key)); return { ...m, kcal: t.kcal, unk: t.unk.kcal, cnt: t.count }; });
@@ -74,7 +77,7 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
     const lastAvg = lastTimes.length ? lastTimes.reduce((a, b) => a + b, 0) / lastTimes.length : 0;
     const water = days.map((d) => data.water[d] || 0).filter(Boolean);
     const ai = all.filter((e) => e.source.startsWith('ai')).length;
-    const balance = full.reduce((a, d) => a + (d.value - tg.kcal), 0);
+    const balance = full.reduce((a, d) => a + (d.value - d.target), 0);
     // калории блюд, у которых нет разбивки на БЖУ — серый сегмент в полосе БЖУ
     const kcalNoMacro = all.filter((e) => !hasAnyMacros(e.item)).reduce((a, e) => a + kcalOf(e.item, e.portion), 0);
     return {
@@ -85,7 +88,7 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
       waterAvg: water.length ? water.reduce((a, b) => a + b, 0) / water.length : 0,
       count: all.length, ai, balance, unk: tot.unk, kcalNoMacro: kcalNoMacro / n,
     };
-  }, [data.entries, data.water, period, tg.kcal]);
+  }, [data.entries, data.water, period, tg.kcal, data.targetLog, data.statsMode]);
 
   const weights = data.weights.filter((w) => w.date >= addDays(todayKey(), -Math.max(period, 30)));
   const wDelta = weights.length >= 2 ? weights[weights.length - 1].kg - weights[0].kg : 0;
@@ -125,6 +128,10 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
         </View>
       ) : null}
 
+      {/* норма: по истории или по последнему значению */}
+      <Seg big items={[{ key: 'history', label: 'Норма по истории' }, { key: 'latest', label: 'По последней' }]} value={data.statsMode === 'latest' ? 'latest' : 'history'}
+        onChange={(m) => store.update((d) => ({ ...d, statsMode: m }))} style={{ marginHorizontal: 20, marginBottom: 12 }} />
+
       {/* главные числа */}
       <View style={st.grid}>
         <Stat label="В среднем" value={fmt(s.avg)} unk={!!s.unk.kcal} unit="ккал/день" />
@@ -139,12 +146,12 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
       <View style={st.block}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 10 }}>
           <Text style={[T.h3, { flex: 1 }]}>Калории по дням</Text>
-          <Text style={T.small}>— норма {fmt(tg.kcal)}</Text>
+          <Text style={T.small}>— норма {data.statsMode === 'latest' ? fmt(tg.kcal) : 'по дням'}</Text>
         </View>
         <DayBars data={s.series} target={tg.kcal} width={cw} onPress={(k) => setSel(sel === k ? undefined : k)} selected={sel} />
         <Text style={[T.small, { marginTop: 6, minHeight: 17 }]}>
           {selDay
-            ? `${shortDate(selDay.key)}: ${fmt(selDay.value)}${selDay.unk ? ' +?' : ''} ккал${selDay.unk ? ` · ${selDay.unk} ${plural(selDay.unk, 'запись', 'записи', 'записей')} без калорий` : selDay.value ? ` (${(selDay.value > tg.kcal ? '+' : '') + fmt(selDay.value - tg.kcal)} к норме)` : ' · нет записей'}`
+            ? `${shortDate(selDay.key)}: ${fmt(selDay.value)}${selDay.unk ? ' +?' : ''} ккал${selDay.unk ? ` · ${selDay.unk} ${plural(selDay.unk, 'запись', 'записи', 'записей')} без калорий` : selDay.value ? ` (${(selDay.value > selDay.target ? '+' : '') + fmt(selDay.value - selDay.target)} к норме ${fmt(selDay.target)})` : ' · нет записей'}`
             : 'Нажмите на столбец, чтобы увидеть день'}
         </Text>
         {s.series.some((d) => d.unk) ? <Legend items={[{ color: C.line, label: '«?» — съедено, но калорий неизвестно: столбик на деле выше', unknown: true }]} /> : null}

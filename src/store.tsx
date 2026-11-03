@@ -1,19 +1,23 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppData, Chat, ChatMsg, ChatSettings, Entry, FoodItem, MealDef, Menu, Profile, Targets, WeightPoint } from './types';
+import { AppData, Chat, ChatMsg, ChatSettings, Entry, FoodItem, IconRef, IconSettings, MealDef, Menu, Profile, TargetRecord, Targets, WeightPoint } from './types';
 import { calcTargets, DEFAULT_MEALS, setMealsConfig } from './utils';
 import * as L from './logic';
 import * as CH from './chat';
 import { deletePhoto, loadData, saveData } from './storage';
 import { DEFAULT_MODELS } from './ai';
+import { defaultIconSettings } from './iconify';
 import { setSoundMap, setSoundsEnabled, setSoundVolume } from './sound';
 
 const defaultProfile: Profile = { name: '', sex: 'male', age: 30, height: 178, weight: 80, activity: 1.375, goal: 'lose' };
 
-export const defaultData = (): AppData => ({
+export const defaultData = (): AppData => {
+  const targets = calcTargets(defaultProfile);
+  return {
   version: 1,
   onboarded: false,
   profile: defaultProfile,
-  targets: calcTargets(defaultProfile),
+  targets,
+  targetLog: [{ id: 'init', at: Date.now(), kcal: targets.kcal, protein: targets.protein, fat: targets.fat, carbs: targets.carbs }],
   ai: { provider: 'gemini', claudeModel: DEFAULT_MODELS.claude, geminiModel: DEFAULT_MODELS.gemini },
   entries: [],
   favorites: [],
@@ -22,7 +26,11 @@ export const defaultData = (): AppData => ({
   water: {},
   meals: DEFAULT_MEALS,
   soundMap: {},
-});
+  icons: defaultIconSettings(),
+  iconPacks: {},
+  iconCache: {},
+  };
+};
 
 interface Store {
   data: AppData;
@@ -41,6 +49,9 @@ interface Store {
   addWeight: (w: WeightPoint) => void;
   removeWeight: (date: string) => void;
   setTargets: (t: Targets) => void;
+  saveTargetRecord: (r: TargetRecord) => void;
+  /** последнюю оставшуюся запись удалить нельзя */
+  deleteTargetRecord: (id: string) => void;
   setProfile: (p: Profile) => void;
   replaceAll: (d: AppData) => void;
   saveMenu: (m: Menu) => void;
@@ -62,6 +73,11 @@ interface Store {
   togglePinChat: (id: string) => void;
   restoreChat: (chat: Chat) => void;
   setChatSettings: (s: ChatSettings) => void;
+  setIconSettings: (s: IconSettings) => void;
+  clearIconCache: () => void;
+  setManualIcon: (key: string, ref: IconRef | null) => void;
+  cacheIcon: (key: string, icon: string) => void;
+  setPackDownloaded: (prefix: string, info: { bytes: number; at: number } | null) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -119,7 +135,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setWater: (date, glasses) => update((d) => L.setWater(d, date, glasses)),
       addWeight: (w) => update((d) => L.addWeight(d, w)),
       removeWeight: (date) => update((d) => L.removeWeight(d, date)),
-      setTargets: (t) => update((d) => ({ ...d, targets: t })),
+      setTargets: (t) => update((d) => ({ ...d, targets: t, targetLog: L.recordTargets(d.targetLog, t) })),
+      saveTargetRecord: (r) => update((d) => { const targetLog = L.upsertTargetRecord(d.targetLog, r); return { ...d, targetLog, targets: L.targetsFromLog(d.targets, targetLog) }; }),
+      deleteTargetRecord: (id) => update((d) => { const left = L.deleteTargetRecord(d.targetLog, id); const targetLog = left.length ? left : d.targetLog; return { ...d, targetLog, targets: L.targetsFromLog(d.targets, targetLog) }; }),
       setProfile: (p) => update((d) => ({ ...d, profile: p })),
       saveMenu: (m) => update((d) => L.saveMenu(d, m)),
       attachMenu: (id, date) => update((d) => L.attachMenu(d, id, date)),
@@ -139,6 +157,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       togglePinChat: (id) => update((d) => CH.togglePinChat(d, id)),
       restoreChat: (chat) => update((d) => CH.upsertChat(d, chat)),
       setChatSettings: (cs) => update((d) => ({ ...d, chatSettings: cs })),
+      setIconSettings: (st) => update((d) => L.setIconSettings(d, st)),
+      clearIconCache: () => update((d) => L.clearIconCache(d)),
+      setManualIcon: (key, ref) => update((d) => L.setManualIcon(d, key, ref)),
+      cacheIcon: (key, icon) => update((d) => L.cacheIcon(d, key, icon)),
+      setPackDownloaded: (prefix, info) => update((d) => L.setPackDownloaded(d, prefix, info)),
       deleteMenu: (id) => update((d) => L.deleteMenu(d, id)),
       replaceAll: (nd) => setData({ ...defaultData(), ...nd, onboarded: true }),
     }),

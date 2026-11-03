@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, LayoutAnimation, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, LayoutAnimation, Pressable, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/RNText';
 import { play } from '../sound';
 import { C, T } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Btn, Field, NumField, Sheet } from '../ui/kit';
 import { useStore } from '../store';
+import { mergeItems } from '../logic';
+import { DishAssist, ExplainButton } from './DishAssist';
 import { buildLibrary, LibItem, searchLibrary } from '../library';
 import { analyzeFood } from '../ai';
 import { getKey } from '../storage';
@@ -88,15 +91,9 @@ export function PresetEditor({ visible, initial, presetId, onClose }: {
       const first = r.items[0];
       if (!first) { Alert.alert('Не распознано', r.comment || ''); return; }
       if (r.items.length > 1) {
-        // несколько позиций — складываем в одно блюдо
-        // сумма только по известным значениям; если у всех позиций показатель неизвестен — остаётся неизвестным
-        const add = (f: 'kcal' | 'protein' | 'fat' | 'carbs') => {
-          const v = r.items.map((x) => x[f]).filter((n): n is number => typeof n === 'number');
-          return v.length ? v.reduce((a, b) => a + b, 0) : undefined;
-        };
-        const s: FoodItem = { name: '', kcal: add('kcal'), protein: add('protein'), fat: add('fat'), carbs: add('carbs'),
-          fiber: r.items.reduce((a, b) => a + (b.fiber || 0), 0), sugar: r.items.reduce((a, b) => a + (b.sugar || 0), 0), grams: r.items.reduce((a, b) => a + (b.grams || 0), 0) || undefined };
-        setIt({ ...s, name: it.name || r.items.map((x) => x.name).join(' + '), note: r.items.map((x) => x.name).join(', '), portion: undefined });
+        // несколько позиций — складываем в одно блюдо (неизвестное остаётся неизвестным)
+        const m = mergeItems(r.items.map(({ portion, ...x }) => ({ item: x, portion: portion || 1 })));
+        setIt({ ...m, name: it.name || m.name, explain: r.explanation, portion: undefined });
       } else setIt({ ...first, name: it.name || first.name, portion: undefined });
       play('ai');
     } catch (e: any) {
@@ -142,7 +139,9 @@ export function PresetEditor({ visible, initial, presetId, onClose }: {
           <NumField label="Сахар" suffix="г" value={it.sugar || 0} onChange={(n) => set({ sugar: n })} style={{ flex: 1 }} />
         </View>
         <Field label="Заметка" value={it.note || ''} onChangeText={(t) => set({ note: t })} placeholder="состав, откуда" />
+        <ExplainButton items={[it]} />
       </View>
+      {it.name.trim() ? <DishAssist items={[it]} onItems={(its) => setIt({ ...its[0], portion: undefined })} placeholder="Уточнить для ИИ: «без соуса», «порция 300 г»…" /> : null}
     </Sheet>
   );
 }

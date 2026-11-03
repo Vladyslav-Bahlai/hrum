@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { C, T } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Btn, Chip, Field, Hair, NumField, Seg } from '../ui/kit';
 import { useStore, defaultData } from '../store';
+import { IconsSection, TargetHistorySection } from './SettingsExtra';
 import { DEFAULT_MODELS, listModels, pickModel } from '../ai';
 import { getKey, importSound, readTextFile, setKey, storagePath, writeBackup } from '../storage';
 import { MealDef, Profile, Provider } from '../types';
@@ -320,13 +322,14 @@ function ChatSection() {
 }
 
 function MealsSection() {
-  const { data, setMeals } = useStore();
+  const { data, setMeals, update } = useStore();
   const meals = data.meals || DEFAULT_MEALS;
   const upd = (i: number, patch: Partial<MealDef>) => setMeals(meals.map((m, j) => (j === i ? { ...m, ...patch } : m)));
   const hr = (m: number) => Math.round(m / 60);
   return (
     <View style={{ gap: 12 }}>
       <Text style={T.small}>Категории дневника и часы, когда они действуют. По времени приложение само предлагает нужную категорию для нового блюда. Блюда удалённой категории переедут в ближайшую по времени.</Text>
+      <ToggleRow label="Подбирать приём пищи по времени" hint="при смене времени записи категория меняется сама" on={data.autoMeal !== false} onChange={(v) => update((d) => ({ ...d, autoMeal: v ? undefined : false }))} />
       {meals.map((m, i) => (
         <View key={m.key} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 12, gap: 8 }}>
           <Field label="Название" value={m.label} onChangeText={(t) => upd(i, { label: t })} />
@@ -364,8 +367,10 @@ const SECTIONS = [
   { key: 'ai', title: 'Искусственный интеллект', C: AISection },
   { key: 'chat', title: 'Чат с ИИ', C: ChatSection },
   { key: 'targets', title: 'Дневная норма', C: TargetsSection },
+  { key: 'history', title: 'История нормы', C: TargetHistorySection },
   { key: 'profile', title: 'Рассчитать норму', C: ProfileSection },
   { key: 'meals', title: 'Категории дневника', C: MealsSection },
+  { key: 'icons', title: 'Иконки блюд', C: IconsSection },
   { key: 'sound', title: 'Звуки', C: SoundSection },
   { key: 'data', title: 'Данные', C: DataSection },
 ] as const;
@@ -380,6 +385,7 @@ export function SettingsScreen() {
         const Comp = s.C as any;
         const sub = s.key === 'ai' ? (data.ai.provider === 'claude' ? 'Claude' : 'Gemini')
           : s.key === 'targets' ? `${data.targets.kcal} ккал`
+          : s.key === 'history' ? `${(data.targetLog || []).length}`
           : s.key === 'sound' ? (data.sounds === false ? 'выкл' : 'вкл') : '';
         return (
           <View key={s.key} style={st.group}>

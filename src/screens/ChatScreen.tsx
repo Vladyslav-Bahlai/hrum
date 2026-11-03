@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
 import { buildChatContext, chatName, estimateTokens, sortedChats, tokensLabel } from '../chat';
 import { Btn, Empty, IconBtn } from '../ui/kit';
@@ -25,18 +26,18 @@ export function ChatScreen({ chat, onMinimize, onClose, style }: {
     <View style={[{ position: 'absolute', left: 0, right: 0, backgroundColor: C.paper }, style]}>
       <View style={{ flex: 1 }}>
         <View style={s.head}>
-          <IconBtn name={list ? 'left' : 'down'} size={24} onPress={() => (list ? setList(false) : onMinimize())} />
+          <IconBtn name={list ? 'left' : 'down'} label={list ? 'Назад к чату' : 'Свернуть чат'} size={24} onPress={() => (list ? setList(false) : onMinimize())} />
           <View style={{ flex: 1, paddingHorizontal: 6 }}>
             <Text style={T.h2} numberOfLines={1}>{list ? 'Чаты' : chat.title}</Text>
             {!list ? <Text style={T.small}>контекст {tokensLabel(ctxTokens)} · только чтение</Text> : null}
           </View>
-          {!list ? <IconBtn name="list" size={24} onPress={() => { Keyboard.dismiss(); setList(true); }} /> : null}
-          <IconBtn name="close" size={24} onPress={onClose} />
+          {!list ? <IconBtn name="list" label="Список чатов" size={24} onPress={() => { Keyboard.dismiss(); setList(true); }} /> : null}
+          <IconBtn name="close" label="Закрыть чат" size={24} onPress={onClose} />
         </View>
 
         {list ? (
           <View style={{ flex: 1 }}>
-            <View style={{ flex: 1 }}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 12 }}>
               {chats.length === 0 ? <Empty title="Чатов пока нет" text="Задайте вопрос в режиме «Спросить» — чат за день появится здесь." /> : (
                 <View style={{ paddingHorizontal: 16 }}>
                   {chats.map((c) => {
@@ -54,7 +55,7 @@ export function ChatScreen({ chat, onMinimize, onClose, style }: {
                   })}
                 </View>
               )}
-            </View>
+            </ScrollView>
             <View style={{ paddingHorizontal: 16, gap: 8 }}>
               {!chat.isToday ? <Btn label="К сегодняшнему чату" kind="soft" onPress={() => { chat.open(chat.dayId); setList(false); }} /> : null}
             </View>

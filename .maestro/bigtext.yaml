@@ -1,0 +1,19 @@
+# Скриншоты с увеличенным системным размером текста (iOS Dynamic Type / Android font scale).
+appId: com.hrum.diary
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Сегодня"
+    timeout: 20000
+- takeScreenshot: ${OUT}/20-bigtext-diary
+- tapOn:
+    id: "fab"
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/21-bigtext-panel
+- tapOn: "Меню"
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/22-bigtext-menu
+- tapOn: "Настройки"
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/23-bigtext-settings

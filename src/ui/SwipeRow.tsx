@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { LayoutAnimation, Pressable, Text, View } from 'react-native';
+import { LayoutAnimation, Pressable, View } from 'react-native';
+import { Text } from './RNText';
 import { C } from '../theme';
 import { Icon } from './Icon';
 

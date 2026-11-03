@@ -1,6 +1,7 @@
-import { AISettings, AppData, Entry, FoodItem, MealDef, Menu, WeightPoint } from './types';
+import { AISettings, AppData, Entry, FoodItem, IconRef, IconSettings, MealDef, Menu, TargetRecord, WeightPoint } from './types';
 import { chatSettings } from './chat';
-import { DEFAULT_MEALS, mealAtMinutes, minutesOf, timestampAt, toKey, todayKey, uid } from './utils';
+import { normalizeIconSettings } from './iconify';
+import { addDays, DEFAULT_MEALS, fromKey, mealAtMinutes, minutesOf, pad, timestampAt, toKey, todayKey, uid } from './utils';
 
 /** Чистые функции над данными приложения: store.tsx только вызывает их (так их можно тестировать без React). */
 
@@ -145,7 +146,23 @@ export const migrate = (raw: Partial<AppData>, base: AppData): AppData => {
     const f = { claude: favOf(ai.favModels.claude), gemini: favOf(ai.favModels.gemini) };
     ai.favModels = f;
   } else delete ai.favModels;
-  return { ...base, ...d, meals, entries, menus, soundVolume, chats, chatSettings: cs, ai, collapsed: collapsed?.length ? collapsed : undefined } as AppData;
+  const targets = { ...base.targets, ...(d.targets || {}) };
+  // история нормы: старые данные получают одну запись — текущую норму «с самого начала» (с первой записи дневника)
+  const rawLog = Array.isArray(d.targetLog) ? d.targetLog.filter((r: any) => r && typeof r.at === 'number' && typeof r.kcal === 'number' && r.kcal > 0) : [];
+  const firstTs = entries.reduce((a: number, e: any) => (typeof e.time === 'number' && e.time < a ? e.time : a), Date.now());
+  const targetLog: TargetRecord[] = rawLog.length
+    ? sortLog(rawLog.map((r: any) => ({ id: typeof r.id === 'string' && r.id ? r.id : uid(), at: r.at, kcal: r.kcal, protein: r.protein, fat: r.fat, carbs: r.carbs })))
+    : [{ id: 'init', at: timestampAt(toKey(new Date(firstTs)), 0), kcal: targets.kcal, protein: targets.protein, fat: targets.fat, carbs: targets.carbs }];
+  const statsMode = d.statsMode === 'latest' ? 'latest' : 'history';
+  const autoMeal = d.autoMeal === false ? false : undefined;
+  const icons = normalizeIconSettings(d.icons);
+  const iconPacks = d.iconPacks && typeof d.iconPacks === 'object' && !Array.isArray(d.iconPacks)
+    ? Object.fromEntries(Object.entries(d.iconPacks).filter(([, v]: any) => v && typeof v.bytes === 'number')) as Record<string, { bytes: number; at: number }>
+    : {};
+  const iconCache = d.iconCache && typeof d.iconCache === 'object' && !Array.isArray(d.iconCache)
+    ? Object.fromEntries(Object.entries(d.iconCache).filter(([k, v]) => typeof k === 'string' && typeof v === 'string')) as Record<string, string>
+    : {};
+  return { ...base, ...d, targets, targetLog, statsMode, autoMeal, icons, iconCache, iconPacks, meals, entries, menus, soundVolume, chats, chatSettings: cs, ai, collapsed: collapsed?.length ? collapsed : undefined } as AppData;
 };
 
 /** Панель ввода сворачивается в кнопку, только если в ней ничего не происходит. */
@@ -210,4 +227,186 @@ export const daySwipeAllowed = (o: { animating: boolean; chatOpen: boolean; dx: 
   if (!(Math.abs(o.dx) > 10 && Math.abs(o.dx) > Math.abs(o.dy) * 1.8)) return false;
   const z = o.zone;
   return !(z && o.y0 >= z.y - 6 && o.y0 <= z.y + z.h + 6);
+};
+
+// ---------- «руль» выбора доли порции ----------
+
+/** Метка шкалы: значение, подпись, крупная ли (0…2 — крупные с широким шагом), позиция в px от начала шкалы. */
+export interface PortionMark { v: number; label: string; big: boolean; x: number }
+const FRAC: [number, string][] = [[0, '0'], [0.25, '¼'], [1 / 3, '⅓'], [0.5, '½'], [2 / 3, '⅔'], [0.75, '¾'], [1, '1'], [1.25, '1¼'], [1.5, '1½'], [2, '2']];
+/** Подпись доли: «¼», «1½», «2½», «7»… */
+export const fracLabel = (v: number): string => {
+  const f = FRAC.find(([x]) => Math.abs(x - v) < 0.01);
+  if (f) return f[1];
+  const whole = Math.floor(v + 1e-6);
+  const rest = v - whole;
+  if (Math.abs(rest) < 0.01) return String(whole);
+  if (Math.abs(rest - 0.5) < 0.01) return `${whole}½`;
+  return String(Math.round(v * 100) / 100).replace('.', ',');
+};
+/** Шкала 0…10: до 2 — все дроби с шагом `bigGap`, дальше — каждые ½ с шагом `smallGap`. */
+export const portionMarks = (bigGap = 60, smallGap = 34): PortionMark[] => {
+  const out: PortionMark[] = FRAC.map(([v, label], i) => ({ v, label, big: true, x: i * bigGap }));
+  let x = out[out.length - 1].x;
+  for (let v = 2.5; v <= 10.0001; v += 0.5) { x += smallGap; out.push({ v, label: fracLabel(v), big: false, x }); }
+  return out;
+};
+/** Ближайшая метка к позиции прокрутки. */
+export const markAtOffset = (marks: PortionMark[], x: number): PortionMark =>
+  marks.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a), marks[0]);
+/** Ближайшая метка к значению (для начальной позиции). */
+export const markForValue = (marks: PortionMark[], v: number): PortionMark =>
+  marks.reduce((a, b) => (Math.abs(b.v - v) < Math.abs(a.v - v) ? b : a), marks[0]);
+
+// ---------- история нормы ----------
+
+const sameTargets = (r: { kcal: number; protein?: number; fat?: number; carbs?: number }, t: { kcal: number; protein?: number; fat?: number; carbs?: number }) =>
+  r.kcal === t.kcal && (r.protein ?? null) === (t.protein ?? null) && (r.fat ?? null) === (t.fat ?? null) && (r.carbs ?? null) === (t.carbs ?? null);
+export const sortLog = (log: TargetRecord[]) => [...log].sort((a, b) => a.at - b.at);
+/** Записать изменение нормы (если норма действительно изменилась). */
+export const recordTargets = (log: TargetRecord[] | undefined, t: { kcal: number; protein?: number; fat?: number; carbs?: number }, at = Date.now(), genId: () => string = uid, mergeMs = 120000): TargetRecord[] => {
+  const cur = sortLog(log || []);
+  const last = cur[cur.length - 1];
+  if (last && sameTargets(last, t)) return cur;
+  const rec = { kcal: t.kcal, protein: t.protein, fat: t.fat, carbs: t.carbs };
+  // правка поля по цифрам («1» → «18» → «1800») — одна запись: недавнюю запись заменяем, а не плодим
+  if (last && at >= last.at && at - last.at < mergeMs && cur.length > 1) return [...cur.slice(0, -1), { ...last, ...rec, at }];
+  return [...cur, { id: genId(), at, ...rec }];
+};
+/** Норма, действовавшая в день `dateKey` (на конец дня). До первой записи — первая запись. */
+export const targetAt = (dateKey: string, log: TargetRecord[] | undefined, fallback: { kcal: number; protein?: number; fat?: number; carbs?: number }) => {
+  const list = sortLog(log || []);
+  if (!list.length) return fallback;
+  const end = timestampAt(dateKey, 24 * 60 - 1) + 59999;
+  let cur = list[0];
+  for (const r of list) if (r.at <= end) cur = r;
+  return { kcal: cur.kcal, protein: cur.protein ?? fallback.protein, fat: cur.fat ?? fallback.fat, carbs: cur.carbs ?? fallback.carbs };
+};
+/** Норма дня с учётом режима статистики. */
+export const dayTarget = (d: Pick<AppData, 'targets' | 'targetLog' | 'statsMode'>, dateKey: string) =>
+  d.statsMode === 'latest' ? d.targets : { ...d.targets, ...targetAt(dateKey, d.targetLog, d.targets) };
+export const upsertTargetRecord = (log: TargetRecord[] | undefined, r: TargetRecord) => sortLog([...(log || []).filter((x) => x.id !== r.id), r]);
+export const deleteTargetRecord = (log: TargetRecord[] | undefined, id: string) => (log || []).filter((x) => x.id !== id);
+/** Текущая норма = последняя запись истории (после ручной правки истории). */
+export const targetsFromLog = (targets: AppData['targets'], log: TargetRecord[] | undefined) => {
+  const l = sortLog(log || []);
+  const last = l[l.length - 1];
+  if (!last) return targets;
+  return { ...targets, kcal: last.kcal, protein: last.protein ?? targets.protein, fat: last.fat ?? targets.fat, carbs: last.carbs ?? targets.carbs };
+};
+
+// ---------- навигация по дням ----------
+
+/** Можно ли перейти на день `date + n` (в будущее — нельзя). */
+export const canGo = (date: string, n: number, today: string) => n < 0 || addDays(date, n) <= today;
+/** День не позже сегодняшнего. */
+export const clampDay = (date: string, today: string) => (date > today ? today : date);
+
+// ---------- название меню по дате на фото ----------
+
+const WD_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+const W = (alts: string) => new RegExp(`(^|[^а-яёіїєґa-z])(${alts})(?=$|[^а-яёіїєґa-z])`, 'i');
+const WD_WORDS: [RegExp, number][] = [
+  [W('пн|понедельник\\S*|пон|monday|mon|понеділ\\S*'), 1], [W('вт|вторник\\S*|tuesday|tue|вівтор\\S*'), 2], [W('ср|сред[аеуы]|среда|wednesday|wed|серед[аиу]'), 3],
+  [W('чт|четверг\\S*|thursday|thu|четвер\\S*'), 4], [W('пт|пятниц\\S*|friday|fri|п.ятниц\\S*'), 5], [W('сб|суббот\\S*|saturday|sat|субот\\S*'), 6], [W('вс|воскресень\\S*|sunday|sun|неділ\\S*'), 0],
+];
+const MONTH_WORDS = ['январ', 'феврал', 'март', 'апрел', 'ма', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
+/**
+ * Приводит название меню к виду «Сб (01.01.2026)», если в нём есть дата (и/или день недели).
+ * Год, если его нет, берётся из `refDate` (ближайший к нему). Без даты — название без изменений.
+ */
+export const normalizeMenuTitle = (title: string, refDate: string): string => {
+  const t = (title || '').trim();
+  if (!t) return t;
+  const ref = fromKey(refDate);
+  let day: number | undefined, mon: number | undefined, year: number | undefined;
+  const m1 = t.match(/(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?/);
+  if (m1) { day = +m1[1]; mon = +m1[2] - 1; if (m1[3]) year = +m1[3] < 100 ? 2000 + +m1[3] : +m1[3]; }
+  else {
+    const m2 = t.toLowerCase().replace(/ё/g, 'е').match(/(\d{1,2})\s+([а-я]+)(?:\s+(\d{4}))?/);
+    if (m2) {
+      const mi = MONTH_WORDS.findIndex((w, i) => (i === 4 ? /^ма[йя]/.test(m2[2]) : m2[2].startsWith(w)));
+      if (mi >= 0) { day = +m2[1]; mon = mi; if (m2[3]) year = +m2[3]; }
+    }
+  }
+  if (day === undefined || mon === undefined || mon < 0 || mon > 11 || day < 1 || day > 31) return t;
+  if (year === undefined) {
+    // год не указан: ближайшая к дню меню дата
+    const cands = [ref.getFullYear() - 1, ref.getFullYear(), ref.getFullYear() + 1].map((y) => new Date(y, mon!, day!));
+    year = cands.reduce((a, b) => (Math.abs(b.getTime() - ref.getTime()) < Math.abs(a.getTime() - ref.getTime()) ? b : a)).getFullYear();
+  }
+  const d = new Date(year, mon, day);
+  if (d.getMonth() !== mon) return t;
+  return `${WD_SHORT[d.getDay()]} (${pad(day)}.${pad(mon + 1)}.${year})`;
+};
+/** Есть ли в названии день недели (без даты) — для подсказки. */
+export const weekdayIn = (title: string): number | undefined => { for (const [re, n] of WD_WORDS) if (re.test(title)) return n; return undefined; };
+
+// ---------- слияние блюд в одно ----------
+
+const addOpt = (a?: number, b?: number) => (a === undefined && b === undefined ? undefined : (a || 0) + (b || 0));
+/** Объединяет блюда (с долями порций) в одно целое: значения суммируются, название — сводка, состав — в заметке. */
+export const mergeItems = (parts: { item: FoodItem; portion: number }[]): FoodItem => {
+  const list = parts.filter((p) => p.item.name.trim());
+  if (!list.length) return { name: '' };
+  if (list.length === 1 && list[0].portion === 1) return { ...list[0].item };
+  const sc = (v: number | undefined, p: number) => (v === undefined ? undefined : v * p);
+  // неизвестное значение у части блюд — итог неизвестен (не делаем вид, что там ноль)
+  const sumKey = (k: 'kcal' | 'protein' | 'fat' | 'carbs') => (list.every((p) => typeof p.item[k] === 'number') ? list.reduce((a, p) => a + (p.item[k] as number) * p.portion, 0) : undefined);
+  const r1 = (v?: number) => (v === undefined ? undefined : Math.round(v * 10) / 10);
+  const names = list.map((p) => (p.portion !== 1 ? `${p.item.name} (${fracLabel(p.portion)})` : p.item.name));
+  const title = list.length <= 3 ? list.map((p) => p.item.name).join(' + ') : `${list[0].item.name} и ещё ${list.length - 1}`;
+  const grams = list.every((p) => p.item.grams) ? list.reduce((a, p) => a + p.item.grams! * p.portion, 0) : undefined;
+  const fiber = list.reduce<number | undefined>((a, p) => addOpt(a, sc(p.item.fiber, p.portion)), undefined);
+  const sugar = list.reduce<number | undefined>((a, p) => addOpt(a, sc(p.item.sugar, p.portion)), undefined);
+  const kcal = sumKey('kcal');
+  return {
+    name: title.slice(0, 80),
+    kcal: kcal === undefined ? undefined : Math.round(kcal),
+    protein: r1(sumKey('protein')), fat: r1(sumKey('fat')), carbs: r1(sumKey('carbs')),
+    fiber: r1(fiber), sugar: r1(sugar),
+    grams: grams ? Math.round(grams) : undefined,
+    emoji: list[0].item.emoji,
+    note: `Состав: ${names.join(', ')}`.slice(0, 160),
+    section: list[0].item.section,
+  };
+};
+
+// ---------- настройки иконок ----------
+
+/** Меняет настройки иконок. Если поменялись источники онлайн-поиска или порядок запроса — кэш онлайн-поиска сбрасывается, чтобы изменения были видны сразу. */
+export const setIconSettings = (d: AppData, next: IconSettings): AppData => {
+  const cur = d.icons;
+  const reset = !cur || JSON.stringify(cur.online) !== JSON.stringify(next.online) || cur.first !== next.first;
+  return reset ? { ...d, icons: next, iconCache: {} } : { ...d, icons: next };
+};
+export const clearIconCache = (d: AppData): AppData => ({ ...d, iconCache: {} });
+/** Ручная привязка иконки к названию блюда (null — снова автоматически). */
+export const setManualIcon = (d: AppData, key: string, ref: IconRef | null): AppData => {
+  const st = d.icons || normalizeIconSettings(undefined);
+  const manual = { ...st.manual };
+  if (ref) manual[key] = ref; else delete manual[key];
+  return { ...d, icons: { ...st, manual } };
+};
+export const cacheIcon = (d: AppData, key: string, icon: string): AppData => (d.iconCache?.[key] === icon ? d : { ...d, iconCache: { ...(d.iconCache || {}), [key]: icon } });
+export const setPackDownloaded = (d: AppData, prefix: string, info: { bytes: number; at: number } | null): AppData => {
+  const cur = { ...(d.iconPacks || {}) };
+  if (info) cur[prefix] = info; else delete cur[prefix];
+  return { ...d, iconPacks: cur };
+};
+
+/** Название меню из ответа ИИ: с датой → «Сб (01.01.2026)»; только день недели → ближайший к дню загрузки такой день; иначе — undefined (название по дню). */
+export const menuTitleFromAI = (title: string | undefined, refDate: string): string | undefined => {
+  const t = (title || '').trim();
+  if (!t) return undefined;
+  const norm = normalizeMenuTitle(t, refDate);
+  if (norm !== t || /^(Пн|Вт|Ср|Чт|Пт|Сб|Вс) \(\d{2}\.\d{2}\.\d{4}\)$/.test(t)) return norm;
+  const wd = weekdayIn(t);
+  if (wd === undefined) return undefined;
+  // только день недели: ближайшая к дню загрузки дата с этим днём (±3 дня)
+  for (const off of [0, 1, -1, 2, -2, 3, -3]) {
+    const k = addDays(refDate, off);
+    if (fromKey(k).getDay() === wd) { const d = fromKey(k); return `${WD_SHORT[wd]} (${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()})`; }
+  }
+  return undefined;
 };

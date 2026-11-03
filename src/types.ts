@@ -37,6 +37,10 @@ export interface FoodItem {
   section?: string;
   /** подсказка ИИ: какую долю порции съели */
   portion?: number;
+  /** объяснение ИИ: как посчитаны значения (допущения, источники) */
+  explain?: string;
+  /** короткое английское название (от ИИ) — для поиска иконки */
+  en?: string;
 }
 
 export interface Menu {
@@ -133,6 +137,49 @@ export interface AppData {
   chatSettings?: ChatSettings;
   /** свёрнутые секции интерфейса (например, списки во вкладке «Мои блюда») */
   collapsed?: string[];
+  /** подбирать приём пищи (часть дня) по времени записи; по умолчанию — да */
+  autoMeal?: boolean;
+  /** история нормы: когда и на что менялась дневная норма */
+  targetLog?: TargetRecord[];
+  /** статистика: норма каждого дня по истории или по последнему значению */
+  statsMode?: 'history' | 'latest';
+  /** иконки блюд: цепочка источников и параметры */
+  icons?: IconSettings;
+  /** скачанные паки: префикс → размер и когда скачан (сами данные — в файлах) */
+  iconPacks?: Record<string, { bytes: number; at: number }>;
+  /** кэш онлайн-поиска: ключ блюда → «prefix:name» ('' — не найдено) */
+  iconCache?: Record<string, string>;
+}
+
+export interface IconifySet { prefix: string; on: boolean }
+/** Источник иконок: пак Iconify («pack:noto»), встроенный OpenMoji, системные эмодзи, эмодзи от ИИ, онлайн-поиск, тарелка 🍽️. */
+export type IconSourceId = string;
+export interface IconSettings {
+  /** источники сверху вниз: первый, где нашлось, побеждает */
+  sources: { id: IconSourceId; on: boolean }[];
+  /** онлайн-поиск Iconify: наборы по приоритету, только цветные, лимит результатов */
+  online: { sets: IconifySet[]; coloredOnly: boolean; limit: number };
+  /** что пробовать первым: русский словарь или английское название/эмодзи от ИИ */
+  first: 'dict' | 'ai';
+  size: 'S' | 'M' | 'L';
+  show: { diary: boolean; menu: boolean; carousel: boolean };
+  /** ручная привязка: ключ названия → иконка */
+  manual: Record<string, IconRef>;
+}
+export type IconRef =
+  | { kind: 'pack'; prefix: string; name: string }
+  | { kind: 'online'; icon: string }
+  | { kind: 'emoji'; emoji: string }
+  | { kind: 'openmoji'; hex: string };
+
+/** Запись истории нормы: с момента `at` действует эта норма. */
+export interface TargetRecord {
+  id: string;
+  at: number;
+  kcal: number;
+  protein?: number;
+  fat?: number;
+  carbs?: number;
 }
 
 /** Сообщение чата с ИИ. */
@@ -186,4 +233,8 @@ export interface AIResult {
   title?: string;
   isMenu: boolean;
   comment?: string;
+  /** подробное объяснение ИИ: как посчитаны значения */
+  explanation?: string;
+  /** решение ИИ: одно целое блюдо или отдельные записи */
+  group?: 'single' | 'separate';
 }

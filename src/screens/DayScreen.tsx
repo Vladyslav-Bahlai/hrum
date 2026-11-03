@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Image, Keyboard, LayoutAnimation, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Alert, Animated, Dimensions, Easing, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { DEMO } from '../demo';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Text } from '../ui/RNText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { play } from '../sound';
 import { C, T } from '../theme';
@@ -12,11 +15,13 @@ import { analyzeFood } from '../ai';
 import { getKey, persistPhoto } from '../storage';
 import { Picked } from '../media';
 import { Entry, FoodItem, MealType } from '../types';
+import { mealAtMinutes, parseTime } from '../utils';
 import { addDays, amountLabel, carouselSlides, fmt, humanDate, kcalText, known, macroText, mealByTime, mealFromSection, getMeals, menuLeftCount, minutesOf, OTHER_MEAL, plural, r0, scaled, sum, timestampAt, todayKey } from '../utils';
-import { entryTimestamp, favoriteBubbles } from '../logic';
+import { canGo, clampDay, entryTimestamp, favoriteBubbles } from '../logic';
 import { MenuAd } from './MenuAd';
+import { DishIcon } from '../ui/DishIcon';
+import { IconPicker } from './IconPicker';
 import { Composer } from './Composer';
-import { daySwipeAllowed } from '../logic';
 import { ChatsScreen } from './ChatsScreen';
 import { Draft, ReviewSheet } from './ReviewSheet';
 import { CalendarSheet } from './CalendarSheet';
@@ -48,6 +53,7 @@ export function DayScreen() {
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState<Review | null>(null);
   const [calOpen, setCalOpen] = useState(false);
+  const [iconFor, setIconFor] = useState<FoodItem | null>(null);
   const [kb, setKb] = useState(false);
   const kbH = useKeyboardHeight(); // Android в edge-to-edge окно не ужимает: страницы с полями поднимаем сами
   // ---- свайп по дню: страница едет за пальцем, затем плавно сменяется ----
@@ -55,39 +61,49 @@ export function DayScreen() {
   const wRef = useRef(W); wRef.current = W;
   const slide = useRef(new Animated.Value(0)).current;
   const animating = useRef(false);
+  const today = todayKey();
+  const dateRef = useRef(date); dateRef.current = date;
   const go = (n: number) => {
     if (animating.current) return;
+    // в будущее не листаем: только мягкий «отскок»
+    if (!canGo(dateRef.current, n, todayKey())) { settle(); return; }
     animating.current = true;
     const w = wRef.current;
     Animated.timing(slide, { toValue: -n * w, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
-      setDate((d) => addDays(d, n));
+      setDate((d) => clampDay(addDays(d, n), todayKey()));
       slide.setValue(n * w);
       Animated.timing(slide, { toValue: 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => { animating.current = false; });
     });
   };
   const goRef = useRef(go); goRef.current = go;
-  // зоны, где свайп по дню не нужен (горизонтальные списки): на iPhone родительский PanResponder иначе отбирает у них жест
-  const noSwipe = useRef<{ y: number; h: number } | null>(null);
-  const setNoSwipe = useRef((r: { y: number; h: number } | null) => { noSwipe.current = r; }).current;
-  const [composing, setComposing] = useState(false); // панель ввода раскрыта — карточка «Выбрать с меню» плавно прячется
-  // карточка схлопывается сразу и резко (высота + прозрачность), не дожидаясь анимации панели
-  // карточка только гаснет и не принимает касаний, высота остаётся — позиция прокрутки дня не меняется
-  const cardOp = useRef(new Animated.Value(1)).current;
-  const onComposerOpen = useRef((o: boolean) => { setComposing(o); Animated.timing(cardOp, { toValue: o ? 0 : 1, duration: 170, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(); }).current;
-  const chatOpen = useRef(false); // полноэкранный чат открыт — день не листается
-  const onChatOpen = useRef((o: boolean) => { chatOpen.current = o; }).current;
+  const [composing, setComposing] = useState(false); // панель ввода раскрыта
+  const onComposerOpen = useRef((o: boolean) => { setComposing(o); }).current;
+  const [chatOpen, setChatOpen] = useState(false); // полноэкранный чат открыт — день не листается
+  const onChatOpen = useRef((o: boolean) => { setChatOpen(o); }).current;
   const settle = () => Animated.spring(slide, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 0 }).start();
-  const pan = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) => daySwipeAllowed({ animating: animating.current, chatOpen: chatOpen.current, dx: g.dx, dy: g.dy, y0: g.y0, zone: noSwipe.current }),
-    onPanResponderMove: (_, g) => slide.setValue(g.dx - Math.sign(g.dx) * 10),
-    onPanResponderRelease: (_, g) => {
+  const settleRef = useRef(settle); settleRef.current = settle;
+  // Свайп по дню — жест react-native-gesture-handler. Горизонтальные списки внутри (таблетки меню, пузырьки, шкалы)
+  // — ScrollView из gesture-handler: они активируются раньше (меньший порог) и отменяют свайп дня, в том числе на iPhone.
+  const swipe = useMemo(() => Gesture.Pan()
+    .runOnJS(true)
+    .enabled(!chatOpen)
+    .activeOffsetX([-25, 25])
+    .failOffsetY([-14, 14])
+    .onUpdate((e) => {
+      if (animating.current) return;
+      const toFuture = e.translationX < 0 && !canGo(dateRef.current, 1, todayKey());
+      // в будущее — сильное сопротивление (видно, что дальше нельзя)
+      slide.setValue(toFuture ? e.translationX * 0.15 : e.translationX - Math.sign(e.translationX) * 10);
+    })
+    .onEnd((e) => {
+      if (animating.current) return;
       const w = wRef.current;
-      if (g.dx < -w * 0.22 || g.vx < -0.6) goRef.current(1);
-      else if (g.dx > w * 0.22 || g.vx > 0.6) goRef.current(-1);
-      else settle();
-    },
-    onPanResponderTerminate: settle,
-  })).current;
+      if (e.translationX < -w * 0.22 || e.velocityX < -600) goRef.current(1);
+      else if (e.translationX > w * 0.22 || e.velocityX > 600) goRef.current(-1);
+      else settleRef.current();
+    })
+    .onFinalize((_e, success) => { if (!success && !animating.current) settleRef.current(); }),
+  [chatOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   const pageStyle = {
     flex: 1,
     opacity: slide.interpolate({ inputRange: [-W, 0, W], outputRange: [0.2, 1, 0.2], extrapolate: 'clamp' as const }),
@@ -147,7 +163,12 @@ export function DayScreen() {
       play('ai');
       setReview({
         mode: 'ai', source: photos.length ? 'ai-photo' : 'ai-text', comment: res.comment, photo: photos[0]?.uri,
-        drafts: res.items.map(({ portion, ...item }) => ({ item, portion: portion || 1, on: !res.isMenu || res.items.length <= 2 })),
+        drafts: res.items.map(({ portion, time, meal, ...item }: any) => {
+          // отдельные записи из одного текста: своё время / часть дня, если ИИ их нашёл
+          const minutes = typeof time === 'string' ? parseTime(time) ?? undefined : undefined;
+          const mk = meal ? mealFromSection(meal) : undefined;
+          return { item, portion: portion || 1, on: !res.isMenu || res.items.length <= 2, minutes, meal: mk || (minutes !== undefined ? mealAtMinutes(minutes) : undefined) };
+        }),
         meal: mealForItems(res.items),
       });
       return true;
@@ -238,7 +259,12 @@ export function DayScreen() {
       const photo = review.photo ? persistPhoto(review.photo) : undefined;
       const now = timeFor();
       const base = entryTimestamp(now, date, minutes);
-      store.addEntries(drafts.map((d, i) => ({ date, time: base + i, meal, item: d.item, portion: d.portion, source: review.source, photo, menuId: menuIdFor(d.item.name) })));
+      store.addEntries(drafts.map((d, i) => ({
+        date,
+        time: d.minutes !== undefined ? timestampAt(date, d.minutes) + i : base + i,
+        meal: d.meal || (d.minutes !== undefined && data.autoMeal !== false ? mealAtMinutes(d.minutes) : meal),
+        item: d.item, portion: d.portion, source: review.source, photo, menuId: menuIdFor(d.item.name),
+      })));
       play('add');
     }
     setReview(null);
@@ -262,9 +288,11 @@ export function DayScreen() {
           <ChatsScreen navSpace={navBottom + 70} />
         </View>
       ) : tab === 'menu' ? (
-        <Animated.View {...pan.panHandlers} style={pageStyle}>
-          <MenuScreen date={date} go={go} openCalendar={() => setCalOpen(true)} topInset={ins.top} bottom={kbH ? kbH : navBottom + 70} request={menuReq} onAdd={addFromMenu} onAddAll={addAllFromMenu} onAddDish={quickAdd} noSwipe={setNoSwipe} />
-        </Animated.View>
+        <GestureDetector gesture={swipe}>
+          <Animated.View collapsable={false} style={pageStyle}>
+            <MenuScreen date={date} go={go} canNext={date < today} openCalendar={() => setCalOpen(true)} topInset={ins.top} bottom={kbH ? kbH : navBottom + 70} request={menuReq} onAdd={addFromMenu} onAddAll={addAllFromMenu} onAddDish={quickAdd} />
+          </Animated.View>
+        </GestureDetector>
       ) : (
       <>
       {/* шапка */}
@@ -277,10 +305,11 @@ export function DayScreen() {
           </View>
           {!isToday ? <Text style={[T.small, { color: C.accent }]}>вернуться к сегодня — «Дневник»</Text> : null}
         </Pressable>
-        <IconBtn name="right" onPress={() => go(1)} size={24} />
+        <IconBtn name="right" label="Следующий день" onPress={() => go(1)} size={24} color={isToday ? C.line : C.inkSoft} style={isToday ? { opacity: 0.35 } : undefined} />
       </View>
 
-      <Animated.View {...pan.panHandlers} style={pageStyle}>
+      <GestureDetector gesture={swipe}>
+      <Animated.View collapsable={false} style={pageStyle}>
         <ScrollView contentContainerStyle={{ paddingBottom: 210 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScrollBeginDrag={closeOpenRow} onTouchStart={closeOpenRow}>
           {/* итог дня */}
           <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
@@ -333,8 +362,8 @@ export function DayScreen() {
             </Pressable>
           </View>
 
-          {/* выбор блюда из меню дня */}
-          <Animated.View pointerEvents={composing ? 'none' : 'auto'} style={{ opacity: cardOp }}>
+          {/* выбор блюда из меню дня (при раскрытой панели «+» карточка остаётся на месте) */}
+          <View>
           <Pressable onPress={chooseFromMenu} style={({ pressed }) => [st.next, pressed && { opacity: 0.75 }]}>
             <View style={{ flex: 1 }}>
               <Text style={T.h3}>Выбрать с меню</Text>
@@ -347,7 +376,7 @@ export function DayScreen() {
             </View>
             <View style={st.nextPlus}><Icon name={dayMenus.length ? 'list' : 'plus'} size={26} color={C.white} stroke={2.2} /></View>
           </Pressable>
-          </Animated.View>
+          </View>
 
           {/* приёмы пищи */}
           {entries.length === 0 ? (
@@ -371,7 +400,7 @@ export function DayScreen() {
                   </View>
                   {list.map((e) => (
                     <SwipeRow key={e.id} onLeft={() => remove(e)} onRight={() => repeat(e)}>
-                      <EntryRow e={e} onPress={() => setReview({ mode: 'edit', entry: e })} />
+                      <EntryRow e={e} onPress={() => setReview({ mode: 'edit', entry: e })} onIcon={() => setIconFor(e.item)} />
                     </SwipeRow>
                   ))}
                 </View>
@@ -383,12 +412,14 @@ export function DayScreen() {
           ) : null}
         </ScrollView>
       </Animated.View>
+      </GestureDetector>
       </>
       )}
 
       {tab === 'day' ? <Composer onOpen={onComposerOpen} onChatOpen={onChatOpen} onMenu={chooseFromMenu} busy={busy} onSubmit={submit} quick={quick} onQuick={quickAdd} bottomInset={kb ? 8 : navBottom + 72} chatTop={ins.top + 72}
         onManual={() => setReview({ mode: 'manual', source: 'manual', drafts: [{ item: { name: '' }, portion: 1, on: true }] })} /> : null}
 
+      {DEMO ? <KbDebug /> : null}
       {/* плавающая навигация */}
       {!kb ? (
         <View style={[st.nav, { bottom: navBottom }]}>
@@ -425,9 +456,23 @@ export function DayScreen() {
           <ActBtn label="Собрать вручную" icon="pen" onPress={() => askMenu('manual')} style={{ flex: 0, marginTop: 10, minHeight: 54 }} />
         </Sheet>
       ) : null}
-      {calOpen ? <CalendarSheet visible onClose={() => setCalOpen(false)} value={date} onPick={setDate} /> : null}
+      {iconFor ? <IconPicker item={iconFor} onClose={() => setIconFor(null)} /> : null}
+      {calOpen ? <CalendarSheet visible onClose={() => setCalOpen(false)} value={date} onPick={(k) => setDate(clampDay(k, todayKey()))} /> : null}
     </View>
   );
+}
+
+/** Только в CI-сборке: значения события клавиатуры — чтобы на скриншоте эмулятора было видно, откуда берётся отступ. */
+function KbDebug() {
+  const ins = useSafeAreaInsets();
+  const { height: wh } = useWindowDimensions();
+  const [v, setV] = useState('kb: —');
+  useEffect(() => {
+    const a = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', (e: any) =>
+      setV(`kb h=${Math.round(e.endCoordinates?.height)} y=${Math.round(e.endCoordinates?.screenY)} win=${Math.round(wh)} scr=${Math.round(Dimensions.get('screen').height)} insB=${Math.round(ins.bottom)}`));
+    return () => a.remove();
+  }, [wh, ins.bottom]);
+  return <Text pointerEvents="none" style={{ position: 'absolute', top: ins.top, left: 4, fontSize: 10, color: '#B5523F', backgroundColor: 'rgba(255,255,255,0.8)', zIndex: 99 }}>{v}</Text>;
 }
 
 function Macro({ label, v, t, color, unk }: { label: string; v: number; t: number; color: string; unk?: number }) {
@@ -442,13 +487,13 @@ function Macro({ label, v, t, color, unk }: { label: string; v: number; t: numbe
   );
 }
 
-function EntryRow({ e, onPress, onLongPress, delayLongPress, rowOpen, onCloseRow }: { e: Entry; onPress: () => void; onLongPress?: () => void; delayLongPress?: number; rowOpen?: boolean; onCloseRow?: () => void }) {
+function EntryRow({ e, onPress, onLongPress, delayLongPress, rowOpen, onCloseRow, onIcon }: { e: Entry; onPress: () => void; onLongPress?: () => void; delayLongPress?: number; rowOpen?: boolean; onCloseRow?: () => void; onIcon?: () => void }) {
   const n = scaled(e);
   const k = known(e.item);
   const d = new Date(e.time);
   return (
     <Pressable onPress={rowOpen ? onCloseRow : onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} style={({ pressed }) => [st.row, pressed && { backgroundColor: C.accentTint }]}>
-      {e.photo ? <Image source={{ uri: e.photo }} style={st.ph} /> : null}
+      {e.photo ? <Image source={{ uri: e.photo }} style={st.ph} /> : <View style={{ marginRight: 12 }}><DishIcon name={e.item.name} emoji={e.item.emoji} en={e.item.en} where="diary" onLongPress={onIcon} /></View>}
       <View style={{ flex: 1 }}>
         <Text style={[T.body, { fontWeight: '500' }]} numberOfLines={2}>{e.item.name}</Text>
         <Text style={[T.small, { marginTop: 2 }]}>

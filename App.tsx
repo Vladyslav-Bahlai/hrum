@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from './src/ui/RNText';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts, Lora_400Regular, Lora_600SemiBold, Lora_400Regular_Italic } from '@expo-google-fonts/lora';
 import { StoreProvider, useStore } from './src/store';
 import { C, T } from './src/theme';
@@ -14,6 +16,7 @@ export default function App() {
   const [fonts] = useFonts({ Lora_400Regular, Lora_600SemiBold, Lora_400Regular_Italic });
   const [intro, setIntro] = useState(true);
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <StatusBar style="dark" />
       <StoreProvider>
@@ -21,6 +24,7 @@ export default function App() {
       </StoreProvider>
       {intro ? <Intro onDone={() => setIntro(false)} /> : null}
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

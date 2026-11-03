@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text, TextInput } from '../ui/RNText';
 import { C, noOutline, T } from '../theme';
 import { Icon } from '../ui/Icon';
 import { fromCamera, fromGallery, Picked } from '../media';
@@ -7,6 +8,7 @@ import { FoodItem } from '../types';
 import { known, r0 } from '../utils';
 import { outsideTapAction, PANEL_IDLE_MS, panelIsIdle, panelParts, smallBtnMode } from '../logic';
 import { LinearGradient } from 'expo-linear-gradient';
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { useStore } from '../store';
 import { modelChoices } from '../logic';
 import { Chip, Seg, Sheet, ActBtn, useKeyboardHeight } from '../ui/kit';
@@ -54,6 +56,9 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
   // чат: закрыт / на весь экран / свёрнут в полоску над панелью
   const [chatView, setChatView] = useState<'closed' | 'full' | 'mini'>('closed');
   const [panelH, setPanelH] = useState(0);
+  // полноэкранный чат сворачивается/разворачивается плавно: слой остаётся смонтированным, пока идёт анимация
+  const chatA = useRef(new Animated.Value(0)).current;
+  const [chatMounted, setChatMounted] = useState(false);
   const { height: winH } = useWindowDimensions();
   const chat = useChat();
   const ask = mode === 'ask';
@@ -105,6 +110,14 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
   };
 
   useEffect(() => { onOpen?.(open); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (chatView === 'full' && open && ask) {
+      setChatMounted(true);
+      Animated.timing(chatA, { toValue: 1, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    } else if (chatMounted) {
+      Animated.timing(chatA, { toValue: 0, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(({ finished }) => { if (finished) setChatMounted(false); });
+    }
+  }, [chatView, open, ask]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { onChatOpen?.(chatView === 'full'); return () => onChatOpen?.(false); }, [chatView]); // eslint-disable-line react-hooks/exhaustive-deps
   const closeChat = () => { Keyboard.dismiss(); setChatView('closed'); setMode('log'); };
 
@@ -166,7 +179,7 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
       <Animated.View pointerEvents="box-none" style={[s.wrap, { bottom: kb + baseBottom }]}>
         {/* большая зелёная кнопка */}
         <Animated.View pointerEvents={open ? 'none' : 'box-none'} style={[s.fabWrap, fabStyle]}>
-          <Pressable accessibilityLabel="Добавить еду" onPress={expand} style={({ pressed }) => [s.fab, pressed && { transform: [{ scale: 0.94 }] }]}>
+          <Pressable testID="fab" accessibilityLabel="Добавить еду" onPress={expand} style={({ pressed }) => [s.fab, pressed && { transform: [{ scale: 0.94 }] }]}>
             <Icon name="plus" size={34} color={C.white} stroke={2.4} />
           </Pressable>
         </Animated.View>
@@ -185,7 +198,7 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
 
             {showQuick ? (
               <View style={s.quickWrap}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always"
+                <GHScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always"
                   contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingRight: 100, paddingVertical: 4 }}>
                   {quick.map((q, i) => (
                     <Pressable key={i} onPress={() => { onQuick(q); setBump((x) => x + 1); }} style={s.quick}>
@@ -194,7 +207,7 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
                       <Text style={[T.small, { marginLeft: 6 }]}>{known(q).kcal ? r0(q.kcal!) : '—'}</Text>
                     </Pressable>
                   ))}
-                </ScrollView>
+                </GHScrollView>
                 {/* справа блюда «заползают» под боковые кружки и растворяются */}
                 <LinearGradient pointerEvents="none" colors={['rgba(244,245,240,0)', 'rgba(244,245,240,0.97)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                   style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 110 }} />
@@ -235,6 +248,9 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
                 <View style={{ flex: 1 }}>
                   <TextInput
                     ref={inputRef}
+                    testID="composer-input"
+                    accessibilityLabel="Поле ввода"
+
                     value={text}
                     onChangeText={setText}
                     onFocus={() => setFocus(true)}
@@ -279,10 +295,12 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
           { key: 'gallery', label: 'Галерея', icon: 'image', onPress: () => { void add('gallery'); } },
         ]} />
       </Animated.View>
-      {mounted && open && ask && chatView === 'full' ? (
-        <View onTouchStart={() => setBump((x) => x + 1)} style={{ position: 'absolute', left: 0, right: 0, top: chatTop, bottom: baseBottom + kb + panelH }}>
+      {chatMounted ? (
+        <Animated.View pointerEvents={chatView === 'full' ? 'auto' : 'none'} onTouchStart={() => setBump((x) => x + 1)}
+          style={{ position: 'absolute', left: 0, right: 0, top: chatTop, bottom: baseBottom + kb + panelH, opacity: chatA,
+            transform: [{ translateY: chatA.interpolate({ inputRange: [0, 1], outputRange: [Math.max(200, winH * 0.5), 0] }) }, { scale: chatA.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }}>
           <ChatScreen chat={chat} style={{ top: 0, bottom: 0 }} onMinimize={() => { Keyboard.dismiss(); setChatView('mini'); }} onClose={closeChat} />
-        </View>
+        </Animated.View>
       ) : null}
     </>
   );

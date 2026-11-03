@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/RNText';
 import { play } from '../sound';
 import { C, T } from '../theme';
 import { Icon } from '../ui/Icon';
@@ -12,11 +13,16 @@ import { fromCamera, fromGallery, Picked } from '../media';
 import { FoodItem, Menu } from '../types';
 import { dishState, eatenByName, fmt, humanDate, isClosed, kcalOf, kcalText, known, macroText, menuTitleFor, plural, r0, restItems, sum, uid } from '../utils';
 import { useToast } from '../ui/Toast';
+import { menuTitleFromAI } from '../logic';
 import { Tabs } from '../ui/kit';
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { DishesView, DishPicker } from './Dishes';
+import { DishIcon } from '../ui/DishIcon';
+import { IconPicker } from './IconPicker';
+import { DishAssist, ExplainButton } from './DishAssist';
 
 /** Вкладка «Меню»: сохранённые меню, добавление блюда в дневник одним тапом. */
-export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish, noSwipe }: {
+export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish }: {
   date: string;
   /** отступ снизу для плавающей панели инструментов */
   bottom: number;
@@ -28,8 +34,8 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
   onAdd: (item: FoodItem, portion: number, menu: Menu) => void;
   onAddAll: (items: FoodItem[], menu: Menu) => void;
   onAddDish: (item: FoodItem) => void;
-  /** сообщает родителю зону (в координатах окна), где свайп по дню отключён */
-  noSwipe?: (zone: { y: number; h: number } | null) => void;
+  /** можно ли перейти на следующий день (в будущее нельзя) */
+  canNext: boolean;
 }) {
   const store = useStore();
   const [view, setView] = useState<'menu' | 'dishes'>('menu');
@@ -43,8 +49,13 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
   const [create, setCreate] = useState(false);
   const [edit, setEdit] = useState<Menu | null>(null);
   const [portionFor, setPortionFor] = useState<{ item: FoodItem; index: number } | null>(null);
+  const [iconFor, setIconFor] = useState<FoodItem | null>(null);
   const [amount, setAmount] = useState(1);
-  useEffect(() => { if (portionFor) setAmount(1); }, [portionFor?.index, portionFor?.item.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // блюдо, уточнённое с ИИ («съел только мясо») — добавляется в дневник вместо исходного; меню не меняется
+  const [refined, setRefined] = useState<FoodItem | null>(null);
+  useEffect(() => { if (portionFor) { setAmount(1); setRefined(null); } }, [portionFor?.index, portionFor?.item.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // название остаётся как в меню (по нему считается «съедено»), что изменил ИИ — в заметке
+  const asEaten = (orig: FoodItem, r: FoodItem | null): FoodItem => (!r ? orig : { ...r, name: orig.name, section: orig.section, note: r.name.trim() !== orig.name.trim() ? `${r.name}${r.note ? ' — ' + r.note : ''}` : r.note });
 
   useEffect(() => {
     if (!menus.find((m) => m.id === sel)) setSel(menus[0]?.id);
@@ -62,16 +73,8 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
   // сколько порций каждого блюда уже отмечено в выбранный день
   const eaten = useMemo(() => (menu ? eatenByName(store.data.entries, date, menu.id) : {}), [store.data.entries, date, menu]);
 
-  // горизонтальный список меню не должен листать день (на iPhone родительский жест перехватывает прокрутку)
-  const pillsRef = useRef<any>(null);
-  const measurePills = () => {
-    pillsRef.current?.measureInWindow((_x: number, y: number, _w: number, h: number) => noSwipe?.(h > 0 ? { y, h } : null));
-  };
-  const showPills = view === 'menu' && menus.length > 1;
-  useEffect(() => {
-    if (!showPills) noSwipe?.(null);
-    return () => noSwipe?.(null);
-  }, [showPills]); // eslint-disable-line react-hooks/exhaustive-deps
+  // таблетки меню дня (+ «плюс» в конце — взять из прошлых); список — ScrollView из gesture-handler, он не отдаёт жест свайпу дня
+  const showPills = view === 'menu' && menus.length > 0;
 
   const sections = useMemo(() => {
     const out: { title: string; items: FoodItem[] }[] = [];
@@ -100,7 +103,7 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
           <Text style={T.small}>Меню на</Text>
           <Text style={T.h2} numberOfLines={1}>{humanDate(date)}</Text>
         </Pressable>
-        <Pressable onPress={() => go(1)} hitSlop={8} style={{ padding: 6 }}><Icon name="right" size={24} color={C.inkSoft} /></Pressable>
+        <Pressable accessibilityLabel="Следующий день" onPress={() => go(1)} disabled={!canNext} hitSlop={8} style={{ padding: 6, opacity: canNext ? 1 : 0.3 }}><Icon name="right" size={24} color={canNext ? C.inkSoft : C.line} /></Pressable>
       </View>
 
       <Tabs items={[{ key: 'menu', label: 'Меню дня', n: menus.length || undefined }, { key: 'dishes', label: 'Мои блюда', n: store.data.favorites.length || undefined }]}
@@ -109,8 +112,8 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
       {view === 'dishes' ? <DishesView onAdd={onAddDish} /> : null}
 
       {showPills ? (
-        <View ref={pillsRef} collapsable={false} onLayout={measurePills} onTouchStart={measurePills} style={{ flexGrow: 0, flexShrink: 0 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 0 }}
+        <View style={{ flexGrow: 0, flexShrink: 0 }}>
+        <GHScrollView testID="menu-pills" horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 0 }}
           contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingTop: 12, alignItems: 'center' }}>
           {menus.map((m) => {
             const on = m.id === sel;
@@ -121,7 +124,10 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
               </Pressable>
             );
           })}
-        </ScrollView>
+          <Pressable accessibilityLabel="Добавить меню из прошлых" onPress={() => setPickOld(true)} style={({ pressed }) => [st.pill, st.pillPlus, pressed && { opacity: 0.7 }]}>
+            <Icon name="plus" size={20} color={C.accent} stroke={2.2} />
+          </Pressable>
+        </GHScrollView>
         </View>
       ) : null}
 
@@ -173,8 +179,11 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
                   return (
                     <Pressable key={i} onLongPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} delayLongPress={300}
                       onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} style={({ pressed }) => [st.dish, closed && { opacity: 0.55 }, pressed && { opacity: 0.7 }]}>
-                      <View style={[st.num, n || closed ? { backgroundColor: C.accent, borderColor: C.accent } : null]}>
-                        <Text style={[st.numT, n || closed ? { color: C.white } : null]}>{menu.items.indexOf(it) + 1}</Text>
+                      <View style={{ alignItems: 'center', marginRight: 12, alignSelf: 'flex-start', gap: 6 }}>
+                        <View style={[st.num, { marginRight: 0 }, n || closed ? { backgroundColor: C.accent, borderColor: C.accent } : null]}>
+                          <Text style={[st.numT, n || closed ? { color: C.white } : null]}>{menu.items.indexOf(it) + 1}</Text>
+                        </View>
+                        <DishIcon name={it.name} emoji={it.emoji} en={it.en} where="menu" onLongPress={() => setIconFor(it)} />
                       </View>
                       <View style={{ flex: 1, paddingRight: 10 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -222,7 +231,7 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
         <Sheet visible onClose={() => setPortionFor(null)} title={portionFor.item.name}
           footer={
             <View style={{ gap: 8, paddingBottom: 4 }}>
-              <Btn label={`Добавить · ${kcalText(portionFor.item, amount)}`} onPress={() => { add(portionFor.item, amount); setPortionFor(null); }}
+              <Btn label={`${refined ? 'Добавить уточнённое' : 'Добавить'} · ${kcalText(refined || portionFor.item, amount)}`} onPress={() => { add(asEaten(portionFor.item, refined), amount); setPortionFor(null); }}
                 style={{ paddingVertical: 16 }} disabled={amount <= 0} />
               <ActBtn label={isClosed(menu, portionFor.item.name) ? 'Снять закрытие блюда' : 'Закрыть блюдо'} icon="check" style={{ flex: 0, minHeight: 50 }}
                 onPress={() => {
@@ -251,11 +260,23 @@ export function MenuScreen({ date, go, openCalendar, topInset, bottom, request, 
           <Text style={[T.small, { marginBottom: 12 }]}>
             Полная порция: {kcalText(portionFor.item)}{portionFor.item.grams ? ` · ${r0(portionFor.item.grams)} г` : ''} · {macroText(portionFor.item)}
           </Text>
-          <AmountPicker big value={amount} onChange={setAmount} gramsPerPortion={portionFor.item.grams} kcalPerPortion={portionFor.item.kcal}
+          {refined ? (
+            <View style={st.refined}>
+              <Text style={[T.label, { color: C.accent }]}>Уточнено с ИИ</Text>
+              <Text style={[T.h3, { marginTop: 2 }]}>{refined.name}</Text>
+              <Text style={[T.small, { marginTop: 2 }]}>{kcalText(refined)}{refined.grams ? ` · ${r0(refined.grams)} г` : ''} · {macroText(refined)}</Text>
+              {refined.note ? <Text style={[T.small, { color: C.inkSoft, marginTop: 2 }]}>{refined.note}</Text> : null}
+              <ActBtn label="Вернуть как в меню" icon="repeat" onPress={() => setRefined(null)} style={{ flex: 0, marginTop: 8 }} />
+            </View>
+          ) : null}
+          <AmountPicker big value={amount} onChange={setAmount} gramsPerPortion={(refined || portionFor.item).grams} kcalPerPortion={(refined || portionFor.item).kcal}
             onGramsKnown={(g) => { const it = { ...portionFor.item, grams: g }; store.replaceMenuItem(menu.id, portionFor.index, it); setPortionFor({ ...portionFor, item: it }); }} />
+          <View style={{ marginTop: 12 }}><ExplainButton items={[refined || portionFor.item]} /></View>
+          <DishAssist items={[refined || portionFor.item]} onItems={(its) => setRefined(its[0])} placeholder="Уточнить для ИИ: «съел только мясо», «без гарнира»…" />
         </Sheet>
       ) : null}
 
+      {iconFor ? <IconPicker item={iconFor} onClose={() => setIconFor(null)} /> : null}
       {replace && menu ? (
         <DishPicker visible title="Заменить на…" onClose={() => setReplace(null)}
           onManual={() => { setEditIndex(replace.index); setEdit(menu); setReplace(null); }}
@@ -317,15 +338,17 @@ function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }:
       // каждое фото — отдельное меню (несколько страниц/дней не склеиваются в одно)
       const jobs: (Picked | null)[] = photos.length ? photos : [null];
       const results = await Promise.allSettled(jobs.map((p) =>
-        analyzeFood(data.ai, key, text || 'Распознай меню на фото.', p ? [{ base64: p.base64, mime: p.mime }] : [], { mode: 'menu' })));
+        analyzeFood(data.ai, key, text || 'Распознай меню на фото.', p ? [{ base64: p.base64, mime: p.mime }] : [], { mode: 'menu', refDate: date })));
       const made: Menu[] = [];
       let fail = '';
       results.forEach((r, i) => {
         if (r.status === 'rejected') { fail = (r.reason as any)?.message || String(r.reason); return; }
         if (!r.value.items.length) { fail = r.value.comment || 'Меню не распознано'; return; }
         const p = jobs[i];
+        // дата / день недели с фото → «Сб (01.01.2026)»; иначе — как раньше, по дню
+        const aiTitle = menuTitleFromAI(r.value.title, date);
         made.push({
-          id: uid(), title: jobs.length > 1 ? `${menuTitleFor(date)} · ${i + 1}` : menuTitleFor(date), created: Date.now() + i, dates: [date],
+          id: uid(), title: aiTitle || (jobs.length > 1 ? `${menuTitleFor(date)} · ${i + 1}` : menuTitleFor(date)), created: Date.now() + i, dates: [date],
           items: r.value.items.map(({ portion, ...it }) => it),
           photo: p ? persistPhoto(p.uri) : undefined,
         });
@@ -465,6 +488,8 @@ function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }:
                     <NumField optional label="Жиры" suffix="г" value={it.fat} onChange={(n) => setItem(i, { fat: n })} style={{ flex: 1 }} />
                     <NumField optional label="Углев." suffix="г" value={it.carbs} onChange={(n) => setItem(i, { carbs: n })} style={{ flex: 1 }} />
                   </View>
+                  <ExplainButton items={[it]} />
+                  <DishAssist items={[it]} onItems={(its) => setItem(i, { ...its[0], section: it.section })} placeholder="Попросить ИИ: «пересчитай на 250 г», «это без масла»…" />
                   <View style={{ flexDirection: 'row', gap: 8 }}>
                     <ActBtn label="Выше" icon="left" onPress={() => move(i, -1)} style={{ opacity: i === 0 ? 0.4 : 1 }} />
                     <ActBtn label="Ниже" icon="right" onPress={() => move(i, 1)} style={{ opacity: i === m.items.length - 1 ? 0.4 : 1 }} />
@@ -510,6 +535,8 @@ const st = StyleSheet.create({
   secTitle: { fontFamily: 'Lora_400Regular_Italic', fontSize: 15, color: C.accent, letterSpacing: 0.3 },
   pill: { flexDirection: 'row', alignItems: 'center', height: 38, paddingHorizontal: 14, borderRadius: 19, backgroundColor: C.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, maxWidth: 260 },
   pillOn: { backgroundColor: C.accent, borderColor: C.accent },
+  refined: { padding: 12, borderRadius: 12, backgroundColor: C.accentTint, borderWidth: 1, borderColor: C.accent, marginBottom: 12 },
+  pillPlus: { width: 46, paddingHorizontal: 0, justifyContent: 'center', backgroundColor: C.accentTint, borderStyle: 'dashed', borderColor: C.accent },
   num: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: C.accent, alignItems: 'center', justifyContent: 'center', marginRight: 12, alignSelf: 'flex-start', marginTop: 2 },
   numT: { fontFamily: 'Lora_600SemiBold', fontSize: 16, color: C.accent },
   dish: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
@@ -568,11 +595,13 @@ function PastMenus({ date, limit, onTaken, onAll, showAll }: { date: string; lim
               <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
                 {m.items.map((it, i) => (
                   <View key={i}>
-                    {it.section && it.section !== m.items[i - 1]?.section ? <Text style={[T.small, { color: C.accent, marginTop: 8, fontStyle: 'italic' }]}>{it.section}</Text> : null}
-                    <View style={{ flexDirection: 'row', paddingVertical: 4 }}>
-                      <Text style={[T.small, { width: 26 }]}>{i + 1}.</Text>
-                      <Text style={[T.body, { flex: 1, fontSize: 14 }]}>{it.name}</Text>
-                      <Text style={[T.small, T.num, { marginLeft: 8 }]}>{known(it).kcal ? fmt(it.kcal!) : '—'}</Text>
+                    {it.section && it.section !== m.items[i - 1]?.section ? (
+                      <View style={[st.secHead, { marginTop: 10 }]}><View style={st.secLine} /><Text style={st.secTitle}>{it.section}</Text><View style={st.secLine} /></View>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', paddingVertical: 5 }}>
+                      <Text style={[st.numT, { width: 26, fontSize: 14 }]}>{i + 1}</Text>
+                      <Text style={[T.h3, { flex: 1 }]}>{it.name}</Text>
+                      <Text style={[T.body, T.num, { marginLeft: 8, fontWeight: '700' }, !known(it).kcal && { color: C.muted }]}>{known(it).kcal ? fmt(it.kcal!) : '—'}</Text>
                     </View>
                   </View>
                 ))}

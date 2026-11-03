@@ -1,8 +1,10 @@
 import React from 'react';
 import { Keyboard, useWindowDimensions } from 'react-native';
 import {
-  KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle,
+  Animated, Easing, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInputProps, View, ViewStyle,
 } from 'react-native';
+import { Text, TextInput } from './RNText';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, noOutline, RADIUS, T } from '../theme';
 import { Icon, IconName } from './Icon';
@@ -47,7 +49,7 @@ export function Seg<K extends string | number>({ items, value, onChange, style, 
         const on = it.key === value;
         return (
           <Pressable key={String(it.key)} onPress={() => onChange(it.key)} style={[s.segItem, big && { paddingVertical: 12 }, on && s.segOn]}>
-            <Text style={[T.body, { fontSize: big ? 15 : 13, color: on ? C.ink : C.muted, fontWeight: on ? '600' : '500' }]}>{it.label}</Text>
+            <Text style={[T.body, { fontSize: big ? 15 : 13, color: on ? C.ink : C.muted, fontWeight: on ? '600' : '500' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{it.label}</Text>
           </Pressable>
         );
       })}
@@ -58,7 +60,7 @@ export function Seg<K extends string | number>({ items, value, onChange, style, 
 export function Chip({ label, on, onPress, small }: { label: string; on?: boolean; onPress?: () => void; small?: boolean }) {
   return (
     <Pressable onPress={onPress} style={[s.chip, small && { paddingHorizontal: 10, paddingVertical: 4 }, on && s.chipOn]}>
-      <Text style={[T.body, { fontSize: small ? 13 : 14, color: on ? C.white : C.inkSoft, fontWeight: on ? '600' : '500' }]}>{label}</Text>
+      <Text style={[T.body, { fontSize: small ? 13 : 14, color: on ? C.white : C.inkSoft, fontWeight: on ? '600' : '500' }]} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -73,7 +75,7 @@ export function Btn({ label, onPress, kind = 'primary', icon, disabled, style }:
       style={({ pressed }) => [s.btn, { backgroundColor: bg, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 },
         kind === 'ghost' || kind === 'danger' ? { borderWidth: 1, borderColor: C.lineStrong } : null, style]}>
       {icon ? <Icon name={icon} size={18} color={fg} /> : null}
-      <Text style={[T.body, { color: fg, fontWeight: '600', fontSize: 15 }]}>{label}</Text>
+      <Text style={[T.body, { color: fg, fontWeight: '600', fontSize: 15, flexShrink: 1, textAlign: 'center' }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{label}</Text>
     </Pressable>
   );
 }
@@ -86,7 +88,7 @@ export function ActBtn({ label, icon, onPress, danger, on, style }: { label: str
       style={({ pressed }) => [{ flex: 1, minHeight: 48, borderRadius: 12, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12,
         backgroundColor: danger ? C.overSoft : on ? C.accentSoft : C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: danger ? '#E9C9C0' : C.lineStrong, opacity: pressed ? 0.7 : 1 }, style]}>
       {icon ? <View style={{ width: 20, height: 20, flexShrink: 0 }}><Icon name={icon} size={20} color={fg} /></View> : null}
-      {label ? <Text style={{ color: fg, fontWeight: '600', fontSize: 14.5 }} numberOfLines={1}>{label}</Text> : null}
+      {label ? <Text style={{ color: fg, fontWeight: '600', fontSize: 14.5, flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{label}</Text> : null}
     </Pressable>
   );
 }
@@ -157,42 +159,75 @@ export function NumField(props: NumFieldProps) {
 }
 
 /** Высота экранной клавиатуры (на Android Modal её сам не учитывает). */
+/**
+ * Сколько снизу окна перекрывает клавиатура. На Android (edge-to-edge) React Native сообщает высоту
+ * клавиатуры БЕЗ панели навигации, а окно не ужимается — поэтому добавляем нижний системный отступ
+ * (иначе поле ввода торчит над клавиатурой только наполовину). Поправку можно переопределить для отладки.
+ */
+export const KB = { androidAddNav: true };
+export const keyboardOverlap = (o: { os: string; height: number; screenY?: number; winH?: number; navInset: number; addNav?: boolean }) => {
+  if (o.height <= 0) return 0;
+  if (o.os !== 'android') return o.height;
+  return o.height + ((o.addNav ?? KB.androidAddNav) ? o.navInset : 0);
+};
 export function useKeyboardHeight() {
   const [h, setH] = React.useState(0);
+  const ins = useSafeAreaInsets();
+  const navRef = React.useRef(ins.bottom); navRef.current = ins.bottom;
   React.useEffect(() => {
-    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow', (e: any) => setH(e.endCoordinates?.height || 0));
+    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow', (e: any) =>
+      setH(keyboardOverlap({ os: Platform.OS, height: e.endCoordinates?.height || 0, screenY: e.endCoordinates?.screenY, navInset: navRef.current })));
     const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setH(0));
     return () => { show.remove(); hide.remove(); };
   }, []);
   return h;
 }
 
-export function Sheet({ visible, onClose, title, children, footer }: {
-  visible: boolean; onClose: () => void; title?: string; children: React.ReactNode; footer?: React.ReactNode;
+/** Нижнее окно: затемнение появляется на месте (плавно), а само окно выезжает снизу. */
+export function Sheet({ visible, onClose, title, children, footer, scrollEnabled = true }: {
+  visible: boolean; onClose: () => void; title?: string; children: React.ReactNode; footer?: React.ReactNode; scrollEnabled?: boolean;
 }) {
   const ins = useSafeAreaInsets();
   const kb = useKeyboardHeight();
   const { height: H } = useWindowDimensions();
   // клавиатура поднимает лист целиком; содержимое прокручивается в оставшемся месте
   const avail = H - kb - ins.top - 24;
+  // Modal без своей анимации: фон плавно проявляется на месте, лист выезжает снизу (раньше на iPhone вместе с листом «въезжало» и затемнение)
+  const [shown, setShown] = React.useState(visible);
+  const a = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (visible) {
+      setShown(true);
+      a.setValue(0);
+      Animated.timing(a, { toValue: 1, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    } else if (shown) {
+      Animated.timing(a, { toValue: 0, duration: 200, easing: Easing.in(Easing.quad), useNativeDriver: true }).start(() => setShown(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+  const close = () => (kb ? Keyboard.dismiss() : onClose());
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={{ flex: 1, backgroundColor: 'rgba(16,24,19,0.32)', paddingBottom: kb }}>
-        <Pressable style={{ flex: 1 }} onPress={() => (kb ? Keyboard.dismiss() : onClose())} />
-        <View style={[s.sheet, { paddingBottom: kb ? 10 : ins.bottom + 10, maxHeight: Math.max(240, avail) }]}>
+    <Modal visible={shown} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(16,24,19,0.32)', opacity: a }]} />
+      <View style={{ flex: 1, paddingBottom: kb }}>
+        <Pressable accessibilityLabel="Закрыть" style={{ flex: 1 }} onPress={close} />
+        <Animated.View style={[s.sheet, { paddingBottom: kb ? 10 : ins.bottom + 10, maxHeight: Math.max(240, avail),
+          transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [Math.max(400, H * 0.6), 0] }) }] }]}>
           <View style={s.grab} />
           {title ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 10 }}>
-              <Text style={[T.h2, { flex: 1 }]}>{title}</Text>
-              <IconBtn name="close" onPress={onClose} />
+              <Text style={[T.h2, { flex: 1 }]} numberOfLines={2}>{title}</Text>
+              <IconBtn name="close" label="Закрыть окно" onPress={onClose} />
             </View>
           ) : null}
-          <ScrollView keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}>
+          <ScrollView scrollEnabled={scrollEnabled} keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}>
             {children}
           </ScrollView>
           {footer ? <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>{footer}</View> : null}
-        </View>
+        </Animated.View>
       </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

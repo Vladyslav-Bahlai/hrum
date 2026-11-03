@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/RNText';
 import { play } from '../sound';
 import { C, T } from '../theme';
 import { ActBtn, Btn, NumField, Seg } from '../ui/kit';

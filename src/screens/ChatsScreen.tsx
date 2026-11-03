@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/RNText';
 import { buildChatContext, chatName, ChatHit, estimateTokens, searchChats, tokensLabel } from '../chat';
 import { fromCamera, fromGallery, Picked } from '../media';
 import { purgeChatPhotos, useStore } from '../store';

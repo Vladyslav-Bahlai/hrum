@@ -1,5 +1,6 @@
 import React from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { Text } from './RNText';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { C } from '../theme';
 
@@ -23,11 +24,13 @@ export function Ring({ value, max, size = 132, stroke = 9, children }: { value: 
 
 /** Столбцы калорий по дням + пунктир нормы. */
 export function DayBars({ data, target, width, height = 150, onPress, selected }: {
-  data: { key: string; label: string; value: number; unk?: number }[]; target: number; width: number; height?: number;
+  data: { key: string; label: string; value: number; unk?: number; target?: number }[]; target: number; width: number; height?: number;
   onPress?: (key: string) => void; selected?: string;
 }) {
   const padB = 18, padT = 8;
-  const maxV = Math.max(target * 1.25, ...data.map((d) => d.value), 1);
+  const maxV = Math.max(target * 1.25, ...data.map((d) => (d.target || 0) * 1.25), ...data.map((d) => d.value), 1);
+  // норма по дням (история нормы): линия «ступеньками»; если везде одинаковая — одна линия
+  const stepped = data.some((d) => d.target !== undefined && d.target !== target);
   const hasUnk = data.some((d) => d.unk);
   const gh = hasUnk ? 16 : 0; // место под «призрачный» столбик неизвестного
   const h = height - padB - padT - gh;
@@ -40,7 +43,7 @@ export function DayBars({ data, target, width, height = 150, onPress, selected }
     <Svg width={width} height={height}>
       {data.map((d, i) => {
         const x = i * (bw + gap);
-        const over = d.value > target * 1.05;
+        const over = d.value > (d.target ?? target) * 1.05;
         const bh = Math.max(d.value > 0 ? 2 : 0, (d.value / maxV) * h);
         const top = padT + gh + h - bh;
         return (
@@ -63,7 +66,9 @@ export function DayBars({ data, target, width, height = 150, onPress, selected }
           </React.Fragment>
         );
       })}
-      {target > 0 ? <Line x1={0} x2={width} y1={y(target)} y2={y(target)} stroke={C.inkSoft} strokeDasharray="3 4" strokeWidth={1} /> : null}
+      {stepped
+        ? data.map((d, i) => (d.target ? <Line key={'t' + d.key} x1={i * (bw + gap) - gap / 2} x2={i * (bw + gap) + bw + gap / 2} y1={y(d.target)} y2={y(d.target)} stroke={C.inkSoft} strokeDasharray="3 3" strokeWidth={1.2} /> : null))
+        : target > 0 ? <Line x1={0} x2={width} y1={y(target)} y2={y(target)} stroke={C.inkSoft} strokeDasharray="3 4" strokeWidth={1} /> : null}
     </Svg>
   );
 }

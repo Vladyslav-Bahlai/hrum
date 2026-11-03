@@ -1,5 +1,6 @@
 import { AIResult, AISettings, FoodItem, Menu } from './types';
 import { kcalText, macroText } from './utils';
+import { mergeItems } from './logic';
 
 export interface AIImage {
   base64: string;
@@ -16,24 +17,31 @@ const RULES = `Правила оценки:
 - Если на фото этикетка с КБЖУ на 100 г — пересчитай на указанный вес или на всю упаковку.
 - Названия — коротко и по-русски, с маленьким уточнением (например «Борщ со сметаной», «Капучино 300 мл»).
 - emoji — один подходящий эмодзи.
+- en — короткое английское название для поиска иконки: 1–3 слова, главное блюдо («cheesecake», «beef steak», «tuna pasta», «borscht»).
 - note — короткое уточнение, из чего состоит порция (до 80 символов).
 - comment — короткий нейтральный комментарий по сути (до 140 символов), без нравоучений.
 - Числа: kcal — целое, белки/жиры/углеводы/клетчатка/сахар — граммы с точностью до 0.1.
-- Если значение НЕВОЗМОЖНО определить (в меню или на этикетке его нет, а оценить честно нельзя) — НЕ выдумывай и НЕ ставь 0: просто пропусти поле kcal/protein/fat/carbs. Ноль пиши только тогда, когда в продукте действительно нет этого вещества (вода, чёрный кофе).`;
+- Если значение НЕВОЗМОЖНО определить (в меню или на этикетке его нет, а оценить честно нельзя) — НЕ выдумывай и НЕ ставь 0: просто пропусти поле kcal/protein/fat/carbs. Ноль пиши только тогда, когда в продукте действительно нет этого вещества (вода, чёрный кофе).
+- explanation — подробное объяснение по-русски, как посчитаны значения: какой вес/порцию ты предположил и почему, откуда калорийность (этикетка, меню, типичные значения продуктов), из чего сложились калории и БЖУ, главные допущения. 3–10 коротких строк, можно списком «- ». Пиши так, чтобы человек понял, откуда взялись числа.`;
 
 const SYSTEM_EAT = `Ты — опытный диетолог-нутрициолог. Пользователь ведёт дневник питания и сообщает, что он СЪЕЛ: текстом и/или фото (блюдо, продукт, тарелка, упаковка с этикеткой).
 Распознай каждое отдельное блюдо/продукт и оцени пищевую ценность ОДНОЙ ПОЛНОЙ ПОРЦИИ.
 ${RULES}
 - Поле section оставь пустым, title — пустым.
 - Если пользователь прислал целое меню с множеством позиций — верни все позиции и поставь isMenu=true.
-- Если на входе нет еды — верни пустой список items и объясни в comment.`;
+- Если на входе нет еды — верни пустой список items и объясни в comment.
+ОДНО БЛЮДО ИЛИ НЕСКОЛЬКО ЗАПИСЕЙ (поле group):
+- group="separate" — если по тексту видно, что это РАЗНЫЕ приёмы пищи, моменты или самостоятельные подачи: разное время или части дня («утром», «в обед», «на ужин», «в 15:00»), слова «потом», «позже», «а ещё», «перекусил», или явно отдельные блюда/напитки со своей порцией («тарелка борща и кусок пирога», «латте и круассан»). Тогда каждое — отдельный элемент items; если для него указано время — поле time «ЧЧ:ММ», если часть дня — поле meal («завтрак», «обед», «ужин», «перекус»), иначе оставь пустыми.
+- group="single" — если просто перечислены продукты/ингредиенты одной тарелки через запятую или «и» без таких признаков («гречка, курица, огурец», «овсянка с бананом и орехами»). Тогда верни ОДИН элемент items — целое блюдо с СУММАРНЫМИ значениями: name — короткая сводка («Гречка с курицей и огурцом»), note — состав с примерным весом частей.
+- Фото одной тарелки — single; фото нескольких отдельных продуктов/упаковок — separate.
+Примеры: «утром съел банан, а в обед йогурт» → separate (банан: meal=завтрак; йогурт: meal=обед). «гречка, курица, огурец» → single. «кофе и круассан» → separate. «салат: помидоры, огурцы, масло» → single.`;
 
 const SYSTEM_MENU = `Ты — опытный диетолог-нутрициолог. Пользователь присылает своё МЕНЮ (на день, на неделю, из доставки или ресторана) текстом и/или фото. Его сохранят и потом будут отмечать съеденные блюда.
 Распознай ВСЕ позиции меню строго в исходном порядке (если блюда пронумерованы — сохрани их порядок по номерам; номер в название не включай). Для каждой оцени пищевую ценность ОДНОЙ ПОРЦИИ (если в меню указан выход/вес — используй его).
 ${RULES}
 - section — раздел меню, к которому относится блюдо, как в оригинале («Завтрак», «Обед», «Ужин», «Перекус», «Супы», «Первое», «Напитки»…); если разделов нет — пустая строка.
-- title — короткое название всего меню (до 30 символов), например «Меню на понедельник» или «Доставка Grow Food, 1500 ккал».
-- isMenu=true.`;
+- title — название всего меню. ТЩАТЕЛЬНО ищи на фото название меню и дату: в шапке, в углах, мелким шрифтом, на этикетках, рядом с логотипом. Отдельно внимательно проверь, есть ли на фото дата и/или день недели. Если на фото есть дата — title строго в формате «Сб (01.01.2026)»: краткий день недели (Пн, Вт, Ср, Чт, Пт, Сб, Вс), пробел и дата ДД.ММ.ГГГГ в скобках (день недели вычисли по дате, если он не написан). Если есть только день недели без даты — title равен краткому дню недели («Сб»). Если ни даты, ни дня недели нет — короткое название (до 30 символов), например «Доставка Grow Food, 1500 ккал».
+- group="separate", isMenu=true.`;
 
 const menuContext = (menus: Menu[]) => {
   if (!menus.length) return '';
@@ -57,6 +65,7 @@ const presetContext = (list: FoodItem[]) => {
 const itemProps = {
   name: { type: 'string' },
   emoji: { type: 'string' },
+  en: { type: 'string' },
   grams: { type: 'number' },
   kcal: { type: 'number' },
   protein: { type: 'number' },
@@ -67,6 +76,8 @@ const itemProps = {
   note: { type: 'string' },
   section: { type: 'string' },
   portion: { type: 'number' },
+  time: { type: 'string' },
+  meal: { type: 'string' },
 };
 // kcal/protein/fat/carbs необязательны: пропуск = «неизвестно»
 const required = ['name', 'emoji', 'grams', 'fiber', 'sugar', 'note', 'section', 'portion'];
@@ -78,8 +89,10 @@ export const jsonSchema = {
     isMenu: { type: 'boolean' },
     title: { type: 'string' },
     comment: { type: 'string' },
+    explanation: { type: 'string' },
+    group: { type: 'string', enum: ['single', 'separate'] },
   },
-  required: ['items', 'isMenu', 'title', 'comment'],
+  required: ['items', 'isMenu', 'title', 'comment', 'explanation', 'group'],
 };
 
 // Gemini использует подмножество OpenAPI-схемы с типами в верхнем регистре
@@ -104,10 +117,15 @@ export const num = (v: any) => {
 /** null/пусто/нет поля → «неизвестно», а не 0 */
 export const opt = (v: any): number | undefined => (v === undefined || v === null || v === '' ? undefined : num(v));
 
-export function normalize(raw: any): AIResult {
-  const items: FoodItem[] = (Array.isArray(raw?.items) ? raw.items : []).map((i: any) => ({
+/** Элемент ответа ИИ: блюдо + необязательные время «ЧЧ:ММ» и часть дня (для отдельных записей). */
+export type AIItem = FoodItem & { time?: string; meal?: string };
+
+export function normalize(raw: any): Omit<AIResult, 'items'> & { items: AIItem[] } {
+  const explanation = raw?.explanation ? String(raw.explanation).trim().slice(0, 4000) : undefined;
+  const items: AIItem[] = (Array.isArray(raw?.items) ? raw.items : []).map((i: any) => ({
     name: String(i.name || 'Блюдо').slice(0, 80),
     emoji: i.emoji ? String(i.emoji).slice(0, 4) : '🍽️',
+    ...(i.en && String(i.en).trim() ? { en: String(i.en).trim().toLowerCase().slice(0, 40) } : {}),
     grams: num(i.grams) || undefined,
     kcal: opt(i.kcal) === undefined ? undefined : Math.round(opt(i.kcal)!),
     protein: opt(i.protein),
@@ -117,9 +135,32 @@ export function normalize(raw: any): AIResult {
     sugar: num(i.sugar),
     note: i.note ? String(i.note).slice(0, 120) : undefined,
     section: i.section ? String(i.section).slice(0, 40) : undefined,
-    portion: num(i.portion) > 0 && num(i.portion) <= 5 ? num(i.portion) : undefined,
+    portion: num(i.portion) > 0 && num(i.portion) <= 10 ? num(i.portion) : undefined,
+    ...(explanation ? { explain: explanation } : {}),
+    ...(typeof i.time === 'string' && /^\d{1,2}:\d{2}$/.test(i.time.trim()) ? { time: i.time.trim() } : {}),
+    ...(typeof i.meal === 'string' && i.meal.trim() ? { meal: i.meal.trim().toLowerCase().slice(0, 20) } : {}),
   }));
-  return { items, isMenu: !!raw?.isMenu, title: raw?.title ? String(raw.title).slice(0, 40) : undefined, comment: raw?.comment ? String(raw.comment) : undefined };
+  const group = raw?.group === 'single' || raw?.group === 'separate' ? raw.group : undefined;
+  return { items, isMenu: !!raw?.isMenu, title: raw?.title ? String(raw.title).slice(0, 40) : undefined, comment: raw?.comment ? String(raw.comment) : undefined, explanation, group };
+}
+
+/** Признаки в тексте, что это разные приёмы пищи / моменты (а не состав одной тарелки). */
+export const SEPARATE_MARKERS = /(утр|утром|в обед|на обед|обедал|на ужин|вечером|ужинал|на завтрак|завтракал|перекус|потом|позже|после этого|а ещё|а еще|а также|днём|днем|ночью|\bв \d{1,2}[:.]\d{2}|\bв \d{1,2} час)/i;
+/** Решение «одно блюдо или несколько»: ИИ решает сам; страховка — по тексту, если ИИ не указал или противоречит очевидному. */
+export function decideGroup(text: string, res: Pick<AIResult, 'group' | 'isMenu' | 'items'>, hadPhoto: boolean): 'single' | 'separate' {
+  if (res.isMenu || res.items.length <= 1) return 'separate';
+  const marked = SEPARATE_MARKERS.test(text || '');
+  if (marked) return 'separate'; // явные признаки разных моментов — всегда отдельно
+  if (res.group) return res.group;
+  // ИИ не решил: голое перечисление текстом — одно блюдо; фото без текста — как вернул ИИ
+  return text.trim() && !hadPhoto ? 'single' : 'separate';
+}
+/** Применяет решение: при «single» сливает элементы в одно блюдо с суммарными значениями. */
+export function applyGrouping<R extends AIResult>(res: R, text: string, hadPhoto: boolean): R {
+  const g = decideGroup(text, res, hadPhoto);
+  if (g === 'separate' || res.items.length <= 1) return { ...res, group: g };
+  const merged = mergeItems(res.items.map(({ portion, ...item }) => ({ item, portion: portion || 1 })));
+  return { ...res, group: 'single', items: [{ ...merged, explain: res.explanation, emoji: res.items[0].emoji }] };
 }
 
 export function extractJson(text: string) {
@@ -154,13 +195,11 @@ function withTimeout(ms: number) {
 const timeoutError = (t: { ms: number }) =>
   new AITimeout(`ИИ не ответил за ${Math.round(t.ms / 1000)} с. Запрос мог дойти, но ответ не успел вернуться — попробуйте ещё раз или снимите меню покороче.`);
 
-async function callClaude(key: string, model: string, system: string, text: string, images: AIImage[]): Promise<AIResult> {
-  const content: any[] = images.map((im) => ({
-    type: 'image',
-    source: { type: 'base64', media_type: im.mime, data: im.base64 },
-  }));
-  content.push({ type: 'text', text: text || 'Распознай еду на фото.' });
-  const t = withTimeout(TIMEOUT_MS);
+/** Ход разговора для структурированного запроса: фото — только у последнего вопроса. */
+interface STurn { role: 'user' | 'ai'; text: string }
+
+async function callClaudeJson(key: string, model: string, system: string, turns: STurn[], images: AIImage[], schema: any, toolName: string, ms = TIMEOUT_MS): Promise<any> {
+  const t = withTimeout(ms);
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -175,17 +214,22 @@ async function callClaude(key: string, model: string, system: string, text: stri
         model,
         max_tokens: 4096,
         system,
-        tools: [{ name: 'report_food', description: 'Вернуть распознанные блюда и их КБЖУ', input_schema: jsonSchema }],
-        tool_choice: { type: 'tool', name: 'report_food' },
-        messages: [{ role: 'user', content }],
+        tools: [{ name: toolName, description: 'Вернуть результат в заданном формате', input_schema: schema }],
+        tool_choice: { type: 'tool', name: toolName },
+        messages: turns.map((m, i) => ({
+          role: m.role === 'ai' ? 'assistant' : 'user',
+          content: i === turns.length - 1
+            ? [...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.base64 } })), { type: 'text', text: m.text || 'Распознай еду на фото.' }]
+            : m.text,
+        })),
       }),
     });
     if (!res.ok) throw await readError(res);
     const j = await res.json();
     const tool = (j.content || []).find((c: any) => c.type === 'tool_use');
-    if (tool?.input) return normalize(tool.input);
-    const txt = (j.content || []).map((c: any) => c.text || '').join('');
-    return normalize(extractJson(txt));
+    if (tool?.input) return tool.input;
+    const txt = (j.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('');
+    return extractJson(txt);
   } catch (e) {
     if (t.fired()) throw timeoutError(t);
     throw e;
@@ -194,10 +238,8 @@ async function callClaude(key: string, model: string, system: string, text: stri
   }
 }
 
-async function callGemini(key: string, model: string, system: string, text: string, images: AIImage[]): Promise<AIResult> {
-  const parts: any[] = images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.base64 } }));
-  parts.push({ text: text || 'Распознай еду на фото.' });
-  const t = withTimeout(TIMEOUT_MS);
+async function callGeminiJson(key: string, model: string, system: string, turns: STurn[], images: AIImage[], schema: any, ms = TIMEOUT_MS): Promise<any> {
+  const t = withTimeout(ms);
   const send = (think: boolean) => fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
@@ -206,11 +248,16 @@ async function callGemini(key: string, model: string, system: string, text: stri
       headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts }],
+        contents: turns.map((m, i) => ({
+          role: m.role === 'ai' ? 'model' : 'user',
+          parts: i === turns.length - 1
+            ? [...images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.base64 } })), { text: m.text || 'Распознай еду на фото.' }]
+            : [{ text: m.text }],
+        })),
         generationConfig: {
           temperature: 0.2,
           responseMimeType: 'application/json',
-          responseSchema: toGemini(jsonSchema),
+          responseSchema: toGemini(schema),
           // умеренное «размышление»: для разбора таблицы меню хватает, а ответ приходит в разы быстрее
           ...(think ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
         },
@@ -230,7 +277,7 @@ async function callGemini(key: string, model: string, system: string, text: stri
     const j = await res.json();
     const txt = (j.candidates?.[0]?.content?.parts || []).filter((p: any) => !p.thought).map((p: any) => p.text || '').join('');
     if (!txt) throw new Error(j.promptFeedback?.blockReason ? 'Запрос отклонён: ' + j.promptFeedback.blockReason : 'Пустой ответ от Gemini');
-    return normalize(extractJson(txt));
+    return extractJson(txt);
   } catch (e) {
     if (t.fired()) throw timeoutError(t);
     throw e;
@@ -239,34 +286,41 @@ async function callGemini(key: string, model: string, system: string, text: stri
   }
 }
 
-export async function analyzeFood(
-  settings: AISettings,
-  key: string,
-  text: string,
-  images: AIImage[],
-  opts: { mode?: 'eat' | 'menu'; menus?: Menu[]; presets?: FoodItem[] } = {},
-): Promise<AIResult> {
-  if (!key) throw new Error('Добавьте API-ключ в настройках');
-  const system = opts.mode === 'menu' ? SYSTEM_MENU : SYSTEM_EAT + menuContext(opts.menus || []) + presetContext(opts.presets || []);
-
+/** Структурированный запрос к выбранному провайдеру с повтором при обрыве связи. */
+async function structured(settings: AISettings, key: string, system: string, turns: STurn[], images: AIImage[], schema: any, toolName: string, attempts = 3): Promise<any> {
   const run = () => settings.provider === 'claude'
-    ? callClaude(key, settings.claudeModel || DEFAULT_MODELS.claude, system, text, images)
-    : callGemini(key, settings.geminiModel || DEFAULT_MODELS.gemini, system, text, images);
-
+    ? callClaudeJson(key, settings.claudeModel || DEFAULT_MODELS.claude, system, turns, images, schema, toolName)
+    : callGeminiJson(key, settings.geminiModel || DEFAULT_MODELS.gemini, system, turns, images, schema);
   // Мобильная сеть рвёт длинные запросы с фото — пробуем до трёх раз.
   let last: any;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const started = Date.now();
     try {
       return await run();
     } catch (e: any) {
       last = e;
       // повторяем только быстрые обрывы связи; долгое ожидание/тайм-аут повторять бессмысленно
-      if (e instanceof AITimeout || Date.now() - started > 20000 || !isNetworkHiccup(e) || attempt === 2) break;
+      if (e instanceof AITimeout || Date.now() - started > 20000 || !isNetworkHiccup(e) || attempt === attempts - 1) break;
       await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
     }
   }
   throw friendlyError(last, images.length > 0);
+}
+
+export async function analyzeFood(
+  settings: AISettings,
+  key: string,
+  text: string,
+  images: AIImage[],
+  opts: { mode?: 'eat' | 'menu'; menus?: Menu[]; presets?: FoodItem[]; refDate?: string } = {},
+): Promise<AIResult> {
+  if (!key) throw new Error('Добавьте API-ключ в настройках');
+  const system = opts.mode === 'menu'
+    ? SYSTEM_MENU + (opts.refDate ? `\n- Меню загружают для дня ${opts.refDate} (ГГГГ-ММ-ДД): если на фото дата без года — год бери отсюда.` : '')
+    : SYSTEM_EAT + menuContext(opts.menus || []) + presetContext(opts.presets || []);
+  const raw = await structured(settings, key, system, [{ role: 'user', text }], images, jsonSchema, 'report_food');
+  const res = normalize(raw);
+  return opts.mode === 'menu' ? res : applyGrouping(res, text, images.length > 0);
 }
 
 /** Обрыв связи, который имеет смысл повторить. */
@@ -482,3 +536,62 @@ export function pickModel(provider: 'claude' | 'gemini', models: string[]): stri
   );
 }
 
+
+// ---------- уточнение блюда с ИИ (правка по просьбе пользователя и вопросы по блюду) ----------
+
+const DISH_SYSTEM = `Ты — опытный диетолог-нутрициолог внутри дневника питания. Ниже — текущие блюда (JSON, значения на 1 полную порцию), которые пользователь сейчас записывает или правит. Он уточняет их или задаёт вопрос.
+${RULES}
+Правила разговора:
+- Если сообщение меняет состав, порцию, способ приготовления или значения («съел только мясо», «без соуса», «порция была 300 г», «это было на сливках») — пересчитай и верни ВСЕ блюда в items в том же порядке с обновлёнными значениями (неизменённые — как есть), changed=true.
+- Если это просто вопрос («почему так много калорий?», «сколько тут белка?») — ответь в reply, changed=false, items — пустой список.
+- reply — короткий ответ по-русски (1–5 строк), что изменилось или ответ на вопрос. Без рассуждений вслух.
+- explanation — как посчитаны итоговые значения (если changed=true) — подробно, 3–10 строк; иначе пустая строка.
+- Поле portion оставляй пустым, section — как было у блюда.`;
+
+export const dishSchema = {
+  type: 'object',
+  properties: {
+    reply: { type: 'string' },
+    changed: { type: 'boolean' },
+    items: { type: 'array', items: { type: 'object', properties: itemProps, required } },
+    explanation: { type: 'string' },
+  },
+  required: ['reply', 'changed', 'items', 'explanation'],
+};
+
+export interface DishTalkResult { reply: string; items?: FoodItem[]; explanation?: string }
+
+/** Разбор ответа на уточнение: изменённые блюда (если ИИ их вернул) + текст ответа. */
+export function normalizeDishTalk(raw: any, current: FoodItem[]): DishTalkResult {
+  const reply = raw?.reply ? String(raw.reply).trim() : '';
+  const explanation = raw?.explanation ? String(raw.explanation).trim() : undefined;
+  const changed = raw?.changed === true || raw?.changed === 'true';
+  const got = normalize({ items: raw?.items, explanation }).items.map(({ time, meal, ...it }) => it);
+  if (!changed || !got.length) return { reply: reply || 'Готово.', explanation };
+  // ИИ вернул меньше блюд — оставшиеся не трогаем; раздел блюда сохраняем
+  const items = current.length && got.length !== current.length && got.length < current.length
+    ? current.map((c, i) => (got[i] ? { ...got[i], section: c.section } : c))
+    : got.map((g, i) => ({ ...g, section: current[i]?.section ?? g.section, explain: explanation || g.explain }));
+  return { reply: reply || 'Пересчитал.', items, explanation };
+}
+
+const dishJson = (items: FoodItem[]) => JSON.stringify(items.map(({ explain, ...it }) => it), null, 0);
+
+/**
+ * Разговор о блюде: `turns` — история этого мини-разговора (последним — сообщение пользователя),
+ * `dishes` — текущие блюда. В «Чаты» не сохраняется.
+ */
+export async function dishTalk(settings: AISettings, key: string, dishes: FoodItem[], turns: ChatTurn[], images: AIImage[] = []): Promise<DishTalkResult> {
+  if (!key) throw new Error('Добавьте API-ключ в настройках');
+  const t = toChatTurns(turns);
+  if (!t.length) throw new Error('Напишите уточнение');
+  const system = `${DISH_SYSTEM}\n\nТЕКУЩИЕ БЛЮДА:\n${dishes.length ? dishJson(dishes) : '[] (блюд пока нет — если пользователь описывает еду, верни её как новые блюда, changed=true)'}`;
+  const raw = await structured(settings, key, system, t, images, dishSchema, 'update_dish', 2);
+  return normalizeDishTalk(raw, dishes);
+}
+
+/** «Скорректировать с ИИ»: одна просьба к одному блюду → исправленное блюдо (или исходное, если ИИ ничего не менял). */
+export async function refineDish(settings: AISettings, key: string, item: FoodItem, instruction: string): Promise<{ item: FoodItem; reply: string; changed: boolean }> {
+  const r = await dishTalk(settings, key, [item], [{ role: 'user', text: instruction }]);
+  return { item: r.items?.[0] ? { ...r.items[0], section: item.section } : item, reply: r.reply, changed: !!r.items?.[0] };
+}

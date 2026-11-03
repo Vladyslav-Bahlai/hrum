@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from './RNText';
 import { C, T } from '../theme';
-import { PORTIONS, fmt, r0 } from '../utils';
+import { fmt, r0 } from '../utils';
 import { Seg } from './kit';
+import { PortionWheel } from './PortionWheel';
 
 /**
  * Выбор количества: порциями (¼…2) или граммами — переключается одним тапом.
@@ -42,17 +44,8 @@ export function AmountPicker({ value, onChange, gramsPerPortion, kcalPerPortion,
       <Seg items={[{ key: 'portion', label: 'Порция' }, { key: 'grams', label: g0 ? `Граммы · ${r0(g0)} г = 1` : 'Граммы' }]}
         value={mode} onChange={(m) => { setMode(m); if (m === 'grams' && g0) setGText(String(r0(g0 * value))); }} />
       {mode === 'portion' ? (
-        <View style={st.grid}>
-          {PORTIONS.map((p) => {
-            const on = Math.abs(p.v - value) < 0.01;
-            return (
-              <Pressable key={p.label} onPress={() => onChange(p.v)}
-                style={({ pressed }) => [st.cell, { height: h }, on && st.on, pressed && { opacity: 0.75 }]}>
-                <Text style={{ fontSize: big ? 22 : 18, fontWeight: '700', color: on ? C.white : C.ink }}>{p.label}</Text>
-                {big ? <Text style={{ fontSize: 12, color: on ? '#D6E8DC' : C.muted }}>{kcalPerPortion === undefined ? 'ккал —' : `${fmt(kcalPerPortion * p.v)} ккал`}</Text> : null}
-              </Pressable>
-            );
-          })}
+        <View style={{ marginTop: 12 }}>
+          <PortionWheel value={value} onChange={onChange} kcalPerPortion={kcalPerPortion} gramsPerPortion={g0 || undefined} />
         </View>
       ) : g0 ? (
         <View style={{ marginTop: 10 }}>

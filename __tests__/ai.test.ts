@@ -33,7 +33,7 @@ describe('разбор чисел и ответа ИИ', () => {
     expect(r.comment).toBe('ок');
   });
   test('normalize: границы и мусор', () => {
-    const r = normalize({ items: [{ name: 'x'.repeat(200), portion: 9, section: 'Завтрак', grams: 0 }, {}], isMenu: 1, title: 'T'.repeat(60) });
+    const r = normalize({ items: [{ name: 'x'.repeat(200), portion: 11, section: 'Завтрак', grams: 0 }, {}], isMenu: 1, title: 'T'.repeat(60) });
     expect(r.items[0].name).toHaveLength(80);
     expect(r.items[0].portion).toBeUndefined();
     expect(r.items[0].grams).toBeUndefined();

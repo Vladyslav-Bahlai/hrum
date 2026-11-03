@@ -1,0 +1,87 @@
+# Проверка на настоящих ОС (Android-эмулятор / iOS-симулятор) с демо-данными (EXPO_PUBLIC_DEMO=1).
+appId: com.hrum.diary
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- extendedWaitUntil:
+    visible: "Сегодня"
+    timeout: 20000
+- takeScreenshot: ${OUT}/01-diary
+# 1) поле ввода над клавиатурой
+- tapOn:
+    id: "fab"
+- waitForAnimationToEnd
+- tapOn:
+    id: "composer-input"
+- inputText: "гречка с курицей и огурцом, а потом ещё йогурт и кофе, длинный текст чтобы поле выросло на несколько строк"
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/02-keyboard-input
+- hideKeyboard
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/03-after-keyboard
+# 2) чат в дневнике: открыть «Спросить», прокрутить ленту вверх и вниз
+- tapOn: "Спросить"
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/04-chat-full
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+    duration: 400
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/05-chat-scrolled-up
+- swipe:
+    start: 50%, 30%
+    end: 10%, 30%
+    duration: 300
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/06-chat-hswipe-no-day-change
+- tapOn:
+    text: "Свернуть чат"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/07-chat-mini
+- tapOn:
+    text: "Закрыть чат"
+    optional: true
+# 3) меню: свайп по таблеткам меню не должен листать день
+- tapOn: "Меню"
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/08-menu
+- swipe:
+    from:
+      id: "menu-pills"
+    direction: LEFT
+    duration: 350
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/09-menu-pills-swiped
+- assertVisible: "Сегодня"
+- swipe:
+    from:
+      id: "menu-pills"
+    direction: RIGHT
+    duration: 350
+- waitForAnimationToEnd
+- assertVisible: "Сегодня"
+# свайп дня по пустому месту — в будущее нельзя (остаётся «Сегодня»), в прошлое — можно
+- swipe:
+    start: 85%, 60%
+    end: 10%, 60%
+    duration: 300
+- waitForAnimationToEnd
+- assertVisible: "Сегодня"
+- takeScreenshot: ${OUT}/10-no-future
+# 4) нижнее окно: затемнение не должно «въезжать» вместе с окном
+- tapOn: "Стейк на гриле с булгуром"
+- takeScreenshot: ${OUT}/11-sheet-opening
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/12-sheet-open
+- swipe:
+    from:
+      id: "portion-wheel"
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}/13-wheel-swiped
+- assertVisible: "Сегодня"
