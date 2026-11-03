@@ -9,7 +9,7 @@ appId: com.hrum.diary
     visible: "Сегодня"
     timeout: 20000
 - takeScreenshot: ${OUT}/01-diary
-# 1) поле ввода над клавиатурой
+# 1) поле ввода над клавиатурой (в режиме «Записать»)
 - tapOn:
     id: "fab"
 - waitForAnimationToEnd
@@ -18,13 +18,23 @@ appId: com.hrum.diary
 - inputText: "гречка с курицей и огурцом, а потом ещё йогурт и кофе, длинный текст чтобы поле выросло на несколько строк"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/02-keyboard-input
-# убрать клавиатуру тапом по шапке (с текстом панель не сворачивается); hideKeyboard на Android жмёт «Назад» и закрывает приложение
+# свернуть панель (кнопка Свернуть / ActionDot без текста)
 - tapOn:
-    point: 50%, 12%
+    accessibilityLabel: "Свернуть"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/03-after-keyboard
-# 2) чат в дневнике: открыть «Спросить», прокрутить ленту вверх и вниз
+# 2) чат в дневнике: переключить в «Спросить», отправить, прокрутить
+- tapOn:
+    id: "fab"
+- waitForAnimationToEnd
 - tapOn: "Спросить"
+- waitForAnimationToEnd
+- tapOn:
+    id: "composer-input"
+- inputText: "Что полезнее есть на завтрак?"
+- waitForAnimationToEnd
+- tapOn:
+    accessibilityLabel: "Отправить"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/04-chat-full
 - swipe:
