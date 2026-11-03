@@ -130,7 +130,7 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
 
       {/* норма: по истории или по последнему значению */}
       <Seg big items={[{ key: 'history', label: 'Норма по истории' }, { key: 'latest', label: 'По последней' }]} value={data.statsMode === 'latest' ? 'latest' : 'history'}
-        onChange={(m) => store.update((d) => ({ ...d, statsMode: m }))} style={{ marginHorizontal: 20, marginBottom: 12 }} />
+        onChange={(m) => store.update((d) => ({ ...d, statsMode: m }))} style={{ marginBottom: 12 }} />
 
       {/* главные числа */}
       <View style={st.grid}>

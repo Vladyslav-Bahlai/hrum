@@ -18,7 +18,9 @@ appId: com.hrum.diary
 - inputText: "гречка с курицей и огурцом, а потом ещё йогурт и кофе, длинный текст чтобы поле выросло на несколько строк"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/02-keyboard-input
-- hideKeyboard
+# убрать клавиатуру тапом по шапке (с текстом панель не сворачивается); hideKeyboard на Android жмёт «Назад» и закрывает приложение
+- tapOn:
+    point: 50%, 12%
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/03-after-keyboard
 # 2) чат в дневнике: открыть «Спросить», прокрутить ленту вверх и вниз

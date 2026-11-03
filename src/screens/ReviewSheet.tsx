@@ -273,7 +273,7 @@ function InlineKcal({ value, onChange }: { value: number | undefined; onChange: 
     onChange(txt.trim() === '' || !isFinite(n) ? undefined : Math.max(0, n));
   };
   return (
-    <Pressable accessibilityLabel="Изменить калории" onPress={edit ? undefined : start} hitSlop={8} style={{ alignItems: 'flex-end', minWidth: 64 }}>
+    <Pressable accessibilityLabel="Изменить калории" onPress={edit ? undefined : start} hitSlop={8} style={{ alignItems: 'flex-end', minWidth: 64, maxWidth: 110, flexShrink: 0 }}>
       {edit ? (
         <TextInput ref={ref} value={txt} onChangeText={(t) => setTxt(t.replace(/[^0-9.,]/g, ''))} onBlur={commit} onSubmitEditing={commit}
           keyboardType="number-pad" returnKeyType="done" selectTextOnFocus={Platform.OS === 'ios'} placeholder="—" placeholderTextColor={C.muted}
@@ -287,7 +287,7 @@ function InlineKcal({ value, onChange }: { value: number | undefined; onChange: 
 }
 
 const st = StyleSheet.create({
-  inlineKcal: { padding: 0, margin: 0, textAlign: 'right', minWidth: 64, fontFamily: T.h2.fontFamily, borderWidth: 0, backgroundColor: 'transparent' },
+  inlineKcal: { padding: 0, margin: 0, textAlign: 'right', width: 92, fontFamily: T.h2.fontFamily, borderWidth: 0, backgroundColor: 'transparent' },
   itemTarget: { borderColor: C.accent, borderWidth: 2, backgroundColor: C.accentTint },
   itemDrag: { shadowColor: '#0F2A1C', shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 12, zIndex: 10 },
   undo: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, paddingLeft: 14, borderRadius: 12, backgroundColor: C.accentSoft, marginBottom: 10 },

@@ -71,7 +71,7 @@ export function Btn({ label, onPress, kind = 'primary', icon, disabled, style }:
   const bg = kind === 'primary' ? C.accent : kind === 'soft' ? C.accentSoft : 'transparent';
   const fg = kind === 'primary' ? C.white : kind === 'danger' ? C.over : C.accent;
   return (
-    <Pressable onPress={disabled ? undefined : onPress}
+    <Pressable onPress={disabled ? undefined : onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [s.btn, { backgroundColor: bg, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 },
         kind === 'ghost' || kind === 'danger' ? { borderWidth: 1, borderColor: C.lineStrong } : null, style]}>
       {icon ? <Icon name={icon} size={18} color={fg} /> : null}
@@ -84,11 +84,13 @@ export function Btn({ label, onPress, kind = 'primary', icon, disabled, style }:
 export function ActBtn({ label, icon, onPress, danger, on, style }: { label: string; icon?: IconName; onPress: () => void; danger?: boolean; on?: boolean; style?: ViewStyle }) {
   const fg = danger ? C.over : C.accent;
   return (
-    <Pressable onPress={onPress} hitSlop={4}
-      style={({ pressed }) => [{ flex: 1, minHeight: 48, borderRadius: 12, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12,
-        backgroundColor: danger ? C.overSoft : on ? C.accentSoft : C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: danger ? '#E9C9C0' : C.lineStrong, opacity: pressed ? 0.7 : 1 }, style]}>
+    <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={label || undefined}
+      style={({ pressed }) => [{ flex: 1, minWidth: 0, minHeight: 48, borderRadius: 12, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12,
+        backgroundColor: danger ? C.overSoft : on ? C.accentSoft : C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: danger ? '#E9C9C0' : C.lineStrong, opacity: pressed ? 0.7 : 1 }, style,
+        // кнопка фиксированной ширины (звезда, корзина): на вебе flex:0 давал нулевую ширину
+        (style as any)?.width !== undefined ? { flexBasis: 'auto' as any, flexShrink: 0 } : null]}>
       {icon ? <View style={{ width: 20, height: 20, flexShrink: 0 }}><Icon name={icon} size={20} color={fg} /></View> : null}
-      {label ? <Text style={{ color: fg, fontWeight: '600', fontSize: 14.5, flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{label}</Text> : null}
+      {label ? <Text style={{ color: fg, fontWeight: '600', fontSize: 14.5, flexShrink: 1, minWidth: 0 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{label}</Text> : null}
     </Pressable>
   );
 }

@@ -79,7 +79,7 @@ export function CalendarSheet({ visible, onClose, value, onPick }: { visible: bo
             const isToday = k === t;
             const over = kcal > target * 1.05 && !info?.unk;
             return (
-              <Pressable key={i} onPress={() => { onPick(k); onClose(); }} style={{ width: `${100 / 7}%`, height: 52, alignItems: 'center', justifyContent: 'center' }}>
+              <Pressable key={i} disabled={k > t} accessibilityState={{ disabled: k > t }} onPress={() => { onPick(k); onClose(); }} style={{ width: `${100 / 7}%`, height: 52, alignItems: 'center', justifyContent: 'center', opacity: k > t ? 0.35 : 1 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
                   backgroundColor: sel ? C.accent : 'transparent', borderWidth: isToday && !sel ? 1 : 0, borderColor: C.accent }}>
                   <Text style={[T.body, { color: sel ? C.white : k > t ? C.muted : C.ink, fontWeight: sel || isToday ? '700' : '400' }]}>{d}</Text>

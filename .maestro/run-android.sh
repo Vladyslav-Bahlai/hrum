@@ -2,7 +2,7 @@
 # Сценарии на Android-эмуляторе (вызывается из android-emulator-runner)
 set -x
 export PATH="$PATH:$HOME/.maestro/bin"
-OUT=shots/android
+OUT=$PWD/shots/android
 mkdir -p $OUT
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 # 3-кнопочная навигация, как на телефоне пользователя (на ней клавиатура и прятала поле)

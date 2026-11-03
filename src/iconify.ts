@@ -223,7 +223,11 @@ export function normalizeIconSettings(raw: any): IconSettings {
   for (const s of Array.isArray(raw.sources) ? raw.sources : []) {
     if (s && typeof s.id === 'string' && ALL_SOURCES.includes(s.id) && !seen.has(s.id)) { seen.add(s.id); sources.push({ id: s.id, on: s.on !== false }); }
   }
-  for (const d of def.sources) if (!seen.has(d.id)) sources.splice(d.id === 'plate' ? sources.length : Math.max(0, sources.length - 1), 0, { ...d, on: d.id === 'online' ? false : d.on });
+  // недостающие источники — в конец (перед «тарелкой», если она есть)
+  for (const d of def.sources) if (!seen.has(d.id)) {
+    const pi = sources.findIndex((x) => x.id === 'plate');
+    sources.splice(d.id === 'plate' || pi < 0 ? sources.length : pi, 0, { ...d });
+  }
   if (!sources.some((s) => s.on)) sources[sources.length - 1].on = true;
   const o = raw.online || {};
   const manual: Record<string, IconRef> = {};

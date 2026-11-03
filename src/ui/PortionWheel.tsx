@@ -31,8 +31,12 @@ export function PortionWheel({ value, onChange, kcalPerPortion, gramsPerPortion 
   }, [value, w]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const m = markAtOffset(marks, e.nativeEvent.contentOffset.x);
+    if (!placed.current) return;
+    const x = e.nativeEvent.contentOffset.x;
+    const m = markAtOffset(marks, x);
     if (m.v !== live.v) setLive(m);
+    // веб: нет событий окончания инерции — фиксируем значение после паузы прокрутки
+    if (Platform.OS === 'web') { clearTimeout(end.current); end.current = setTimeout(() => { dragging.current = false; settle(x); }, 160); }
   };
   const settle = (x: number) => {
     const m = markAtOffset(marks, x);
@@ -42,6 +46,7 @@ export function PortionWheel({ value, onChange, kcalPerPortion, gramsPerPortion 
     if (Platform.OS === 'web' && Math.abs(m.x - x) > 1) ref.current?.scrollTo({ x: m.x, animated: true });
   };
   const end = useRef<any>(null);
+  const placed = useRef(false);
   const total = marks[marks.length - 1].x;
 
   return (
@@ -75,6 +80,8 @@ export function PortionWheel({ value, onChange, kcalPerPortion, gramsPerPortion 
             }}
             onMomentumScrollBegin={() => clearTimeout(end.current)}
             onMomentumScrollEnd={(e) => { dragging.current = false; settle(e.nativeEvent.contentOffset.x); }}
+            // начальная позиция: когда ширина содержимого известна (contentOffset работает не везде)
+            onContentSizeChange={() => { if (!placed.current) { placed.current = true; ref.current?.scrollTo({ x: markForValue(marks, value).x, animated: false }); } }}
             contentContainerStyle={{ width: total + w, height: 76 }}>
             {marks.map((m) => (
               <View key={m.label} style={[st.mark, { left: w / 2 + m.x - 30 }]} pointerEvents="none">
@@ -99,7 +106,7 @@ const st = StyleSheet.create({
   tickBig: { height: 22, marginTop: 8 },
   tickSmall: { height: 12, marginTop: 8 },
   tickWhole: { width: 3, height: 26, backgroundColor: C.inkSoft },
-  lblBig: { fontSize: 20, fontWeight: '700', color: C.ink, marginTop: 6 },
+  lblBig: { fontSize: 20, fontWeight: '700', color: C.ink, marginTop: 10 },
   lblSmall: { fontSize: 13, fontWeight: '600', color: C.muted, marginTop: 8 },
-  center: { position: 'absolute', top: 0, bottom: 0, width: 3, backgroundColor: C.accent, borderRadius: 2 },
+  center: { position: 'absolute', top: 0, height: 36, width: 3, backgroundColor: C.accent, borderRadius: 2 },
 });

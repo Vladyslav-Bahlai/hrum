@@ -2,7 +2,7 @@
 # Сценарии на iOS-симуляторе
 set -x
 export PATH="$PATH:$HOME/.maestro/bin"
-OUT=shots/ios
+OUT=$PWD/shots/ios
 mkdir -p $OUT
 DEV=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone') and 'Pro' in x['name'] and 'Max' not in x['name']) )" 2>/dev/null)
 [ -z "$DEV" ] && DEV=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
