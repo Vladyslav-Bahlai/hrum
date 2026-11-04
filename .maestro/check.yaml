@@ -12,7 +12,10 @@ appId: com.hrum.diary
 # 1) поле ввода над клавиатурой (в режиме «Записать»)
 - tapOn:
     id: "fab"
-- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 10000
 - tapOn:
     id: "composer-input"
 - inputText: "гречка с курицей и огурцом, а потом ещё йогурт и кофе, длинный текст чтобы поле выросло на несколько строк"
@@ -21,18 +24,26 @@ appId: com.hrum.diary
 # свернуть панель (кнопка Свернуть / ActionDot без текста)
 - tapOn:
     label: "Свернуть"
-- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "fab"
+    timeout: 10000
 - takeScreenshot: ${OUT}/03-after-keyboard
 # 2) режим «Спросить» — переключить и снять, не отправляя (нет ключа API в CI)
 - tapOn:
     id: "fab"
-- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: "Спросить"
+    timeout: 10000
 - tapOn: "Спросить"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/04-ask-mode
 - tapOn:
     label: "Свернуть"
-- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "fab"
+    timeout: 10000
 # 3) меню: свайп по таблеткам меню не должен листать день
 - tapOn: "Меню"
 - waitForAnimationToEnd
