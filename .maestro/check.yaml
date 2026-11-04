@@ -21,9 +21,9 @@ appId: com.hrum.diary
 - inputText: "гречка с курицей и огурцом, а потом ещё йогурт и кофе, длинный текст чтобы поле выросло на несколько строк"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/02-keyboard-input
-# свернуть панель (кнопка Свернуть / ActionDot без текста)
+# свернуть панель (ActionDot без текста = «Свернуть»; тап точно по кнопке, не по фону, т.к. с текстом фон только убирает фокус)
 - tapOn:
-    label: "Свернуть"
+    id: "action-dot"
 - extendedWaitUntil:
     visible:
       id: "fab"
@@ -39,7 +39,7 @@ appId: com.hrum.diary
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/04-ask-mode
 - tapOn:
-    label: "Свернуть"
+    id: "action-dot"
 - extendedWaitUntil:
     visible:
       id: "fab"

@@ -309,7 +309,7 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
 /** Круглая кнопка действия: пусто — «✕ свернуть», есть текст/фото — «стрелка отправить»; иконка и цвет меняются плавно. */
 function ActionDot({ hasInput, sending, sendT, size, onPress, label }: { hasInput: boolean; sending: boolean; sendT: Animated.Value; size: number; onPress: () => void; label: string }) {
   return (
-    <Pressable accessibilityLabel={label} onPress={onPress} style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, overflow: 'hidden' }}>
+    <Pressable testID="action-dot" accessibilityLabel={label} onPress={onPress} style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, overflow: 'hidden' }}>
       <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: sendT.interpolate({ inputRange: [0, 1], outputRange: [C.surface, C.accent] }) }]} />
       {sending ? <ActivityIndicator color={hasInput ? C.white : C.accent} /> : (
         <>
