@@ -3,9 +3,11 @@ appId: com.hrum.diary
 ---
 - launchApp:
     clearState: true
+- waitForAnimationToEnd:
+    timeout: 8000
 - extendedWaitUntil:
     visible: "Сегодня"
-    timeout: 20000
+    timeout: 30000
 - takeScreenshot: ${OUT}/20-bigtext-diary
 - tapOn:
     id: "fab"

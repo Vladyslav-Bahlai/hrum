@@ -13,6 +13,7 @@ adb shell wm size; adb shell wm density
 maestro test -e OUT=shots/android .maestro/check.yaml > $ABSOUT/maestro-check.log 2>&1; echo "check exit $?" >> $ABSOUT/maestro-check.log
 adb exec-out screencap -p > $ABSOUT/99-last.png
 adb shell settings put system font_scale 1.3
+sleep 2
 maestro test -e OUT=shots/android .maestro/bigtext.yaml > $ABSOUT/maestro-bigtext.log 2>&1; echo "bigtext exit $?" >> $ABSOUT/maestro-bigtext.log
 adb shell settings put system font_scale 1.0
 adb logcat -d -t 400 '*:E' > $ABSOUT/logcat-errors.txt || true

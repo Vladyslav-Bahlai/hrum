@@ -20,7 +20,7 @@ appId: com.hrum.diary
 - takeScreenshot: ${OUT}/02-keyboard-input
 # свернуть панель (кнопка Свернуть / ActionDot без текста)
 - tapOn:
-    accessibilityLabel: "Свернуть"
+    label: "Свернуть"
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/03-after-keyboard
 # 2) режим «Спросить» — переключить и снять, не отправляя (нет ключа API в CI)
@@ -31,7 +31,7 @@ appId: com.hrum.diary
 - waitForAnimationToEnd
 - takeScreenshot: ${OUT}/04-ask-mode
 - tapOn:
-    accessibilityLabel: "Свернуть"
+    label: "Свернуть"
 - waitForAnimationToEnd
 # 3) меню: свайп по таблеткам меню не должен листать день
 - tapOn: "Меню"
