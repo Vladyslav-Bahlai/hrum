@@ -1,18 +1,21 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Pressable, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Text } from '../ui/RNText';
-import { C, T } from '../theme';
+import { C, T, TABS, shade } from '../theme';
 import { ActBtn, Btn, Field, NumField, Seg, Sheet } from '../ui/kit';
 import { Icon } from '../ui/Icon';
 import { IconView } from '../ui/DishIcon';
 import { useStore } from '../store';
 import { IconSettings, TargetRecord } from '../types';
 import {
-  defaultIconSettings, downloadPack, fmtBytes, fromSource, iconKey, moveSet, moveSource, normalizeIconSettings, packOf, PACKS, resolveIcon, sourceTitle, toggleSet, toggleSource,
+  defaultIconSettings, dropIndex, hiddenOnlineSets, moveSourceTo, downloadPack, fmtBytes, fromSource, iconKey, moveSet, moveSource, normalizeIconSettings, packOf, PACKS, resolveIcon, sourceTitle, toggleSet, toggleSource,
 } from '../iconify';
 import { packStore } from '../storage';
 import { minutesLabel, parseTime, toKey, uid, fromKey, timestampAt, formatTimeInput } from '../utils';
 import { sortLog } from '../logic';
+const X = TABS.settings;
+const XD = shade(X.accent, 0.72);
 
 function Toggle({ label, hint, on, onChange }: { label: string; hint?: string; on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -21,7 +24,7 @@ function Toggle({ label, hint, on, onChange }: { label: string; hint?: string; o
         <Text style={T.body}>{label}</Text>
         {hint ? <Text style={T.small}>{hint}</Text> : null}
       </View>
-      <View style={[st.sw, on && { backgroundColor: C.accent, borderColor: C.accent }]}>
+      <View style={[st.sw, on && { backgroundColor: X.accent, borderColor: X.accent }]}>
         <Text style={{ color: on ? C.white : C.muted, fontWeight: '700', fontSize: 14 }}>{on ? 'Да' : 'Нет'}</Text>
       </View>
     </Pressable>
@@ -31,8 +34,8 @@ function Toggle({ label, hint, on, onChange }: { label: string; hint?: string; o
 function RoundBtn({ icon, label, onPress, disabled, on }: { icon: any; label: string; onPress: () => void; disabled?: boolean; on?: boolean }) {
   return (
     <Pressable accessibilityLabel={label} onPress={disabled ? undefined : onPress} hitSlop={4}
-      style={({ pressed }) => [st.round, on && { backgroundColor: C.accent, borderColor: C.accent }, (disabled || pressed) && { opacity: disabled ? 0.3 : 0.6 }]}>
-      <Icon name={icon} size={20} color={on ? C.white : C.accent} stroke={2} />
+      style={({ pressed }) => [st.round, on && { backgroundColor: X.accent, borderColor: X.accent }, (disabled || pressed) && { opacity: disabled ? 0.3 : 0.6 }]}>
+      <Icon name={icon} size={20} color={on ? C.white : X.accent} stroke={2} />
     </Pressable>
   );
 }
@@ -48,6 +51,9 @@ export function IconsSection() {
   const set = (s: IconSettings) => setIconSettings(s);
   const [dl, setDl] = useState<Record<string, DL>>({});
   const [check, setCheck] = useState(false);
+  const [openIds, setOpenIds] = useState<string[]>([]);
+  const heights = useRef<Record<string, number>>({});
+  const [drag, setDrag] = useState<{ id: string; dy: number } | null>(null);
   const dlRef = useRef(dl); dlRef.current = dl;
 
   const download = async (prefix: string) => {
@@ -79,40 +85,59 @@ export function IconsSection() {
         const m = isPack ? packOf(prefix) : undefined;
         const have = isPack ? data.iconPacks?.[prefix] : undefined;
         const d = isPack ? dl[prefix] : undefined;
-        const status = !isPack ? (s.id === 'openmoji' ? `встроен · ${PACKS.find((p) => p.builtin)?.count} иконок` : s.id === 'online' ? 'нужен интернет; только блюда, которых не нашли выше' : s.id === 'ai-emoji' ? 'эмодзи, который прислал ИИ' : s.id === 'emoji' ? 'по словарю блюд' : 'если ничего не нашлось')
-          : d && 'err' in d ? `ошибка: ${d.err}`
+        const expandable = isPack || s.id === 'online';
+        const expanded = expandable && s.on && openIds.includes(s.id);
+        const sub = !isPack ? (s.id === 'openmoji' ? `${PACKS.find((p) => p.builtin)?.count} иконок` : s.id === 'online' ? 'нужен интернет' : s.id === 'ai-emoji' ? 'эмодзи от ИИ' : s.id === 'emoji' ? 'по словарю блюд' : 'если ничего не нашлось')
+          : d && 'err' in d ? 'ошибка скачивания'
           : d ? `скачивается ${Math.round(d.p * 100)}%`
-          : have ? `скачан · ${fmtBytes(have.bytes)}, ${m?.count} иконок`
-          : `не скачан · ${fmtBytes(m?.bytes || 0)}, ${m?.count} иконок`;
+          : `${m?.count} иконок`;
+        const dragging = drag?.id === s.id;
+        const pan = Gesture.Pan().runOnJS(true).activeOffsetY([-4, 4])
+          .onUpdate((e) => setDrag({ id: s.id, dy: e.translationY }))
+          .onEnd((e) => {
+            const ids = st0.sources.map((x) => x.id);
+            const hs = ids.map((id) => heights.current[id] || 60);
+            set(moveSourceTo(st0, i, dropIndex(hs, i, e.translationY, 10)));
+            setDrag(null);
+          })
+          .onFinalize(() => setDrag(null));
         return (
-          <View key={s.id} style={[st.src, !s.on && { opacity: 0.6 }]}>
+          <View key={s.id} onLayout={(e) => { heights.current[s.id] = e.nativeEvent.layout.height; }}
+            style={[st.src, !s.on && { opacity: 0.6 }, dragging && { transform: [{ translateY: drag!.dy }, { scale: 1.02 }], zIndex: 10, elevation: 6, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, borderColor: X.accent }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[T.h3, { width: 22, color: C.muted }]}>{i + 1}</Text>
-              <View style={{ flex: 1 }}>
+              <GestureDetector gesture={pan}>
+                <View accessibilityLabel={`Перетащить: ${sourceTitle(s.id)}`} style={st.handle} hitSlop={6}>
+                  <Icon name="grip" size={22} color={C.muted} />
+                </View>
+              </GestureDetector>
+              <Pressable disabled={!expandable || !s.on} style={{ flex: 1 }}
+                onPress={() => setOpenIds((x) => x.includes(s.id) ? x.filter((y) => y !== s.id) : [...x, s.id])}>
                 <Text style={[T.body, { fontWeight: '600' }]} numberOfLines={1}>{sourceTitle(s.id)}</Text>
-                <Text style={T.small}>{status}{m ? ` · ${m.license}` : ''}</Text>
-              </View>
-              <RoundBtn icon="up" label={`Выше: ${sourceTitle(s.id)}`} onPress={() => set(moveSource(st0, s.id, -1))} disabled={i === 0} />
-              <RoundBtn icon="down" label={`Ниже: ${sourceTitle(s.id)}`} onPress={() => set(moveSource(st0, s.id, 1))} disabled={i === st0.sources.length - 1} />
-              <Pressable accessibilityLabel={`${s.on ? 'Выключить' : 'Включить'}: ${sourceTitle(s.id)}`} onPress={() => set(toggleSource(st0, s.id))} style={[st.sw, s.on && { backgroundColor: C.accent, borderColor: C.accent }]}>
+                <Text style={[T.small, { fontSize: 12 }]}>{sub}</Text>
+              </Pressable>
+              {expandable && s.on ? <Icon name={expanded ? 'down' : 'right'} size={18} color={C.muted} /> : null}
+              <Pressable accessibilityLabel={`${s.on ? 'Выключить' : 'Включить'}: ${sourceTitle(s.id)}`} onPress={() => set(toggleSource(st0, s.id))} style={[st.sw, s.on && { backgroundColor: X.accent, borderColor: X.accent }]}>
                 <Text style={{ color: s.on ? C.white : C.muted, fontWeight: '700', fontSize: 14 }}>{s.on ? 'Вкл' : 'Выкл'}</Text>
               </Pressable>
             </View>
-            {isPack ? (
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                {d && 'p' in d ? (
-                  <>
-                    <View style={st.prog}><View style={[st.progIn, { width: `${Math.round(d.p * 100)}%` }]} /></View>
-                    <ActBtn label="Отмена" icon="close" onPress={() => d.abort.abort()} style={{ flex: 0 }} />
-                  </>
-                ) : have ? (
-                  <ActBtn label={`Удалить · освободит ${fmtBytes(have.bytes)}`} icon="trash" danger onPress={() => remove(prefix)} />
-                ) : (
-                  <ActBtn label={d && 'err' in d ? 'Повторить скачивание' : `Скачать · ${fmtBytes(m?.bytes || 0)}`} icon="down" onPress={() => download(prefix)} />
-                )}
+            {expanded && isPack ? (
+              <View style={{ marginTop: 8, gap: 8 }}>
+                <Text style={T.small}>{have ? `скачан · ${fmtBytes(have.bytes)}` : `не скачан · ${fmtBytes(m?.bytes || 0)}`}{m ? ` · ${m.license}` : ''}{d && 'err' in d ? ` · ошибка: ${d.err}` : ''}</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {d && 'p' in d ? (
+                    <>
+                      <View style={st.prog}><View style={[st.progIn, { width: `${Math.round(d.p * 100)}%` }]} /></View>
+                      <ActBtn label="Отмена" icon="close" onPress={() => d.abort.abort()} style={{ flex: 0 }} />
+                    </>
+                  ) : have ? (
+                    <ActBtn label={`Удалить · освободит ${fmtBytes(have.bytes)}`} icon="trash" danger onPress={() => remove(prefix)} />
+                  ) : (
+                    <ActBtn label={d && 'err' in d ? 'Повторить скачивание' : `Скачать · ${fmtBytes(m?.bytes || 0)}`} icon="down" onPress={() => download(prefix)} />
+                  )}
+                </View>
               </View>
             ) : null}
-            {s.id === 'online' && s.on ? <OnlineSettings st={st0} set={set} /> : null}
+            {expanded && s.id === 'online' ? <OnlineSettings st={st0} set={set} hidden={hiddenOnlineSets(st0, data.iconPacks)} /> : null}
           </View>
         );
       })}
@@ -139,17 +164,19 @@ export function IconsSection() {
   );
 }
 
-function OnlineSettings({ st: s0, set }: { st: IconSettings; set: (s: IconSettings) => void }) {
+function OnlineSettings({ st: s0, set, hidden }: { st: IconSettings; set: (s: IconSettings) => void; hidden: Set<string> }) {
   const o = s0.online;
+  const shown = o.sets.filter((x) => !hidden.has(x.prefix));
   return (
-    <View style={{ marginTop: 10, gap: 8, paddingLeft: 8, borderLeftWidth: 2, borderColor: C.accentSoft }}>
+    <View style={{ marginTop: 10, gap: 8, paddingLeft: 8, borderLeftWidth: 2, borderColor: X.soft }}>
       <Text style={T.label}>Наборы для онлайн-поиска</Text>
-      {o.sets.map((x, i) => (
+      {shown.length === 0 ? <Text style={T.small}>Все наборы уже скачаны или стоят выше в списке.</Text> : null}
+      {shown.map((x, i) => (
         <View key={x.prefix} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, opacity: x.on ? 1 : 0.6 }}>
           <Text style={[T.body, { flex: 1 }]} numberOfLines={1}>{packOf(x.prefix)?.title || x.prefix}</Text>
           <RoundBtn icon="up" label={`Онлайн выше: ${x.prefix}`} onPress={() => set({ ...s0, online: { ...o, sets: moveSet(o.sets, x.prefix, -1) } })} disabled={i === 0} />
-          <RoundBtn icon="down" label={`Онлайн ниже: ${x.prefix}`} onPress={() => set({ ...s0, online: { ...o, sets: moveSet(o.sets, x.prefix, 1) } })} disabled={i === o.sets.length - 1} />
-          <Pressable accessibilityLabel={`Онлайн ${x.on ? 'выключить' : 'включить'}: ${x.prefix}`} onPress={() => set({ ...s0, online: { ...o, sets: toggleSet(o.sets, x.prefix) } })} style={[st.sw, x.on && { backgroundColor: C.accent, borderColor: C.accent }]}>
+          <RoundBtn icon="down" label={`Онлайн ниже: ${x.prefix}`} onPress={() => set({ ...s0, online: { ...o, sets: moveSet(o.sets, x.prefix, 1) } })} disabled={i === shown.length - 1} />
+          <Pressable accessibilityLabel={`Онлайн ${x.on ? 'выключить' : 'включить'}: ${x.prefix}`} onPress={() => set({ ...s0, online: { ...o, sets: toggleSet(o.sets, x.prefix) } })} style={[st.sw, x.on && { backgroundColor: X.accent, borderColor: X.accent }]}>
             <Text style={{ color: x.on ? C.white : C.muted, fontWeight: '700', fontSize: 14 }}>{x.on ? 'Вкл' : 'Выкл'}</Text>
           </Pressable>
         </View>
@@ -181,7 +208,7 @@ function IconCheckSheet({ onClose }: { onClose: () => void }) {
         <IconView r={res.ref} size={48} />
         <Text style={[T.body, { flex: 1 }]}>Итог: {res.source === 'manual' ? 'выбрана вручную' : res.source ? sourceTitle(res.source) : 'ничего'}{res.needOnline ? ' (онлайн ещё не искали)' : ''}</Text>
       </View>
-      {st0.sources.map((s) => {
+      {st0.sources.filter((s) => !s.id.startsWith('pack:') || !!data.iconPacks?.[s.id.slice(5)]).map((s) => {
         const r = fromSource(s.id, name, aiEmoji || undefined, en || undefined, ctx);
         return (
           <View key={s.id} style={[st.row, { opacity: s.on ? 1 : 0.5 }]}>
@@ -214,7 +241,7 @@ export function TargetHistorySection() {
     <View style={{ gap: 8 }}>
       <Text style={T.small}>При каждом изменении нормы записывается дата и новое значение. Статистика может считать каждый день по норме, которая действовала в тот день.</Text>
       {[...log].reverse().map((r, i) => (
-        <Pressable key={r.id} accessibilityLabel={`Изменить запись нормы ${dateLabel(r.at)}`} onPress={() => setEdit(r)} style={({ pressed }) => [st.hist, pressed && { backgroundColor: C.accentTint }]}>
+        <Pressable key={r.id} accessibilityLabel={`Изменить запись нормы ${dateLabel(r.at)}`} onPress={() => setEdit(r)} style={({ pressed }) => [st.hist, pressed && { backgroundColor: X.tint }]}>
           <View style={{ flex: 1 }}>
             <Text style={[T.body, { fontWeight: '600' }]}>{r.kcal} ккал{i === 0 ? '  · сейчас' : ''}</Text>
             <Text style={T.small}>с {dateLabel(r.at)}{r.protein !== undefined ? ` · Б ${r.protein} Ж ${r.fat ?? '—'} У ${r.carbs ?? '—'}` : ''}</Text>
@@ -261,9 +288,10 @@ function TargetRecordSheet({ rec, canDelete, onClose, onSave, onDelete }: { rec:
 const st = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', minHeight: 56, borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 6 },
   sw: { minWidth: 64, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.lineStrong, backgroundColor: C.surface },
-  round: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  handle: { width: 32, height: 44, alignItems: 'center', justifyContent: 'center' },
+  round: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: X.tint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   src: { padding: 12, borderRadius: 14, backgroundColor: C.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   prog: { flex: 1, height: 10, borderRadius: 5, backgroundColor: C.line, overflow: 'hidden', alignSelf: 'center' },
-  progIn: { height: 10, backgroundColor: C.accent },
+  progIn: { height: 10, backgroundColor: X.accent },
   hist: { flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingHorizontal: 12, borderRadius: 12, backgroundColor: C.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
 });

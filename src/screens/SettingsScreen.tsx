@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, V
 import { Text } from '../ui/RNText';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
-import { C, T } from '../theme';
+import { C, T, TABS, shade } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Btn, Chip, Field, Hair, NumField, Seg } from '../ui/kit';
 import { useStore, defaultData } from '../store';
@@ -15,6 +15,8 @@ import { ACTIVITY, calcTargets, DEFAULT_MEALS, kcalText, minutesLabel, uid } fro
 import { buildChatContext, chatSettings, CTX_PRESETS, estimateTokens, KEEP_OPTIONS, sameCtx, tokensLabel } from '../chat';
 import { ChatContextOpts } from '../types';
 import { dropPlayer, EVENTS, preview, SOUND_NAMES, VOLUMES, setSoundVolume } from '../sound';
+const X = TABS.settings;
+const XD = shade(X.accent, 0.72);
 
 export function AISection() {
   const { data, update } = useStore();
@@ -24,6 +26,36 @@ export function AISection() {
       <Seg items={[{ key: 'gemini' as Provider, label: 'Google Gemini' }, { key: 'claude' as Provider, label: 'Anthropic Claude' }]}
         value={provider} onChange={(p) => update((d) => ({ ...d, ai: { ...d.ai, provider: p } }))} />
       <KeyForm provider={provider} />
+      <EffortRows />
+    </View>
+  );
+}
+
+const EFFORTS = [
+  { key: 'off', label: 'Выкл' }, { key: 'low', label: 'Мало' },
+  { key: 'medium', label: 'Средне' }, { key: 'high', label: 'Много' },
+] as const;
+
+/** Насколько «долго думает» модель: больше — точнее, но медленнее и дороже. */
+function EffortRows() {
+  const { data, update } = useStore();
+  const ef = data.ai.effort || {};
+  const rows = [
+    { k: 'eat', t: 'Записать еду', def: 'low' },
+    { k: 'chat', t: 'Чат', def: 'low' },
+    { k: 'refine', t: 'Уточнение с ИИ', def: 'low' },
+  ] as const;
+  return (
+    <View style={{ marginTop: 16, gap: 10 }}>
+      <Text style={T.h3}>Глубина размышлений</Text>
+      <Text style={T.small}>Больше — точнее, но дольше и дороже. Работает не со всеми моделями.</Text>
+      {rows.map((r) => (
+        <View key={r.k} style={{ gap: 6 }}>
+          <Text style={T.small}>{r.t}</Text>
+          <Seg items={EFFORTS.map((e) => ({ key: e.key, label: e.label }))} value={(ef[r.k] || r.def) as any}
+            onChange={(v: any) => update((d) => ({ ...d, ai: { ...d.ai, effort: { ...(d.ai.effort || {}), [r.k]: v } } }))} />
+        </View>
+      ))}
     </View>
   );
 }
@@ -75,9 +107,9 @@ function KeyForm({ provider }: { provider: 'claude' | 'gemini' }) {
       {saved && key === saved ? <Text style={[T.small, { marginTop: 5 }]}>Сохранён: {mask(saved)}</Text> : null}
       <Btn label={state === 'checking' ? 'Проверяю…' : 'Проверить и сохранить'} onPress={check} disabled={!key.trim() || state === 'checking'}
         style={{ marginTop: 10 }} kind={state === 'ok' ? 'soft' : 'primary'} icon={state === 'ok' ? 'check' : undefined} />
-      {state === 'checking' ? <ActivityIndicator style={{ marginTop: 8 }} color={C.accent} /> : null}
+      {state === 'checking' ? <ActivityIndicator style={{ marginTop: 8 }} color={X.accent} /> : null}
       {state === 'err' ? <Text style={[T.small, { color: C.over, marginTop: 8 }]}>{err}</Text> : null}
-      {state === 'ok' ? <Text style={[T.small, { color: C.accent, marginTop: 8 }]}>Ключ работает ✓</Text> : null}
+      {state === 'ok' ? <Text style={[T.small, { color: X.accent, marginTop: 8 }]}>Ключ работает ✓</Text> : null}
 
       <Text style={[T.small, { marginTop: 14, marginBottom: 6 }]}>Модель</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -94,7 +126,7 @@ function KeyForm({ provider }: { provider: 'claude' | 'gemini' }) {
           {models.map((m) => {
             const on = !!data.ai.favModels?.[provider]?.includes(m);
             return (
-              <Pressable key={m} accessibilityLabel={`Любимая модель ${m}`} onPress={() => toggleFavModel(provider, m)} style={({ pressed }) => [fav.row, on && { backgroundColor: C.accentTint }, pressed && { opacity: 0.7 }]}>
+              <Pressable key={m} accessibilityLabel={`Любимая модель ${m}`} onPress={() => toggleFavModel(provider, m)} style={({ pressed }) => [fav.row, on && { backgroundColor: X.tint }, pressed && { opacity: 0.7 }]}>
                 <Text style={[T.body, { flex: 1, fontSize: 14 }]} numberOfLines={1}>{m}</Text>
                 <Icon name={on ? 'starFill' : 'star'} size={26} color={on ? C.fat : C.muted} />
               </Pressable>
@@ -205,7 +237,7 @@ function SoundSection() {
   const [open, setOpen] = useState('');
   const choice = (ev: string, def: string) => map[ev] || def;
   const label = (c: string) => (c === 'off' ? 'без звука' : c.startsWith('file:') ? 'свой файл' : SOUND_NAMES.find((x) => x.key === c)?.label || c);
-  const pick = (ev: string, c: string) => { setSoundMap({ ...map, [ev]: c }); preview(c); };
+  const pick = (ev: string, c: string) => { update((d) => ({ ...d, soundMap: { ...(d.soundMap || {}), [ev]: c } })); preview(c); };
   const own = async (ev: string) => {
     try {
       const r = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true });
@@ -235,7 +267,7 @@ function SoundSection() {
                 <Text style={T.body}>{e.label}</Text>
                 {e.hint ? <Text style={T.small}>{e.hint}</Text> : null}
               </View>
-              <Text style={[T.small, { marginRight: 8, color: C.accent }]}>{label(c)}</Text>
+              <Text style={[T.small, { marginRight: 8, color: X.accent }]}>{label(c)}</Text>
               <Icon name={isOpen ? 'down' : 'right'} size={18} color={C.muted} />
             </Pressable>
             {isOpen ? (
@@ -275,7 +307,7 @@ function ToggleRow({ label, hint, on, onChange }: { label: string; hint?: string
         <Text style={T.body}>{label}</Text>
         {hint ? <Text style={T.small}>{hint}</Text> : null}
       </View>
-      <View style={[st.sw, on && { backgroundColor: C.accent, borderColor: C.accent }]}>
+      <View style={[st.sw, on && { backgroundColor: X.accent, borderColor: X.accent }]}>
         <Text style={{ color: on ? C.white : C.muted, fontWeight: '700', fontSize: 14 }}>{on ? 'Да' : 'Нет'}</Text>
       </View>
     </Pressable>
@@ -295,7 +327,7 @@ function ChatSection() {
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {CTX_PRESETS.map((p) => <Chip key={p.key} label={p.label} on={sameCtx(ctx, p.ctx)} onPress={() => setCtx(p.ctx)} />)}
       </View>
-      <Text style={[T.small, { color: C.accent, fontWeight: '600' }]}>Размер контекста: {tokensLabel(tokens)} на вопрос (без истории чата)</Text>
+      <Text style={[T.small, { color: X.accent, fontWeight: '600' }]}>Размер контекста: {tokensLabel(tokens)} на вопрос (без истории чата)</Text>
       <ToggleRow label="Дневник за сегодня" hint="блюда, время, итоги, вода" on={ctx.today} onChange={(v) => setCtx({ today: v })} />
       <ToggleRow label="Меню дня с остатками" hint="что съедено, что осталось" on={ctx.menu} onChange={(v) => setCtx({ menu: v })} />
       <ToggleRow label="Цели и профиль" hint="норма калорий и БЖУ, цель" on={ctx.profile} onChange={(v) => setCtx({ profile: v })} />
@@ -329,6 +361,7 @@ function MealsSection() {
   return (
     <View style={{ gap: 12 }}>
       <Text style={T.small}>Категории дневника и часы, когда они действуют. По времени приложение само предлагает нужную категорию для нового блюда. Блюда удалённой категории переедут в ближайшую по времени.</Text>
+      <ToggleRow label="Десятичные числа вместо дробей" hint="1,5 вместо 1½ в порциях и количествах" on={!!data.decimals} onChange={(v) => update((d) => ({ ...d, decimals: v || undefined }))} />
       <ToggleRow label="Подбирать приём пищи по времени" hint="при смене времени записи категория меняется сама" on={data.autoMeal !== false} onChange={(v) => update((d) => ({ ...d, autoMeal: v ? undefined : false }))} />
       {meals.map((m, i) => (
         <View key={m.key} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 12, gap: 8 }}>
@@ -376,7 +409,7 @@ const SECTIONS = [
 ] as const;
 
 export function SettingsScreen() {
-  const [open, setOpen] = useState<string>('ai');
+  const [open, setOpen] = useState<string>('');
   const { data } = useStore();
   return (
     <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
@@ -399,7 +432,7 @@ export function SettingsScreen() {
         );
       })}
       <Hair />
-      <Text style={[T.small, { marginTop: 14 }]}>Хрум · версия 1.3</Text>
+      <Text style={[T.small, { marginTop: 14 }]}>Хрум · версия 1.5</Text>
     </ScrollView>
   );
 }
@@ -409,10 +442,10 @@ export const resetAll = () => defaultData();
 const st = StyleSheet.create({
   group: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   groupHead: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18 },
-  step: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
-  stepT: { fontSize: 26, color: C.accent, marginTop: -2 },
+  step: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: X.tint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  stepT: { fontSize: 26, color: X.accent, marginTop: -2 },
   sw: { minWidth: 64, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.lineStrong, backgroundColor: C.surface },
-  calc: { backgroundColor: C.accentSoft, borderRadius: 10, padding: 14 },
+  calc: { backgroundColor: X.soft, borderRadius: 10, padding: 14 },
   line: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
 });
 

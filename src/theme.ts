@@ -23,6 +23,24 @@ export const C = {
   white: '#FFFFFF',
 };
 
+/** Палитры вкладок: общая нейтральная основа и один приглушённый акцент на вкладку (без пестроты). */
+export type TabKey = 'day' | 'menu' | 'fill' | 'stats' | 'chats' | 'settings';
+export interface TabTone { accent: string; soft: string; tint: string; paper: string }
+export const TABS: Record<TabKey, TabTone> = {
+  day: { accent: '#2F6249', soft: '#E5EEE7', tint: '#F0F5F1', paper: '#F4F5F0' },
+  menu: { accent: '#8A6A24', soft: '#F0E8D2', tint: '#F8F3E4', paper: '#F7F4EA' },
+  fill: { accent: '#8A5240', soft: '#F1E3DD', tint: '#F8F0EC', paper: '#F7F2EF' },
+  stats: { accent: '#3E627F', soft: '#E1E9F0', tint: '#EDF2F6', paper: '#F1F4F6' },
+  chats: { accent: '#5E5A82', soft: '#E7E5F0', tint: '#F1F0F6', paper: '#F4F3F7' },
+  settings: { accent: '#56615B', soft: '#E4E7E5', tint: '#EFF1F0', paper: '#F3F4F3' },
+};
+/** Чуть темнее — фон «не сегодняшних» дней, чтобы сегодня отличалось от вчера/завтра. */
+export const shade = (hex: string, k = 0.955): string => {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v: number) => Math.round(v * k).toString(16).padStart(2, '0');
+  return '#' + c((n >> 16) & 255) + c((n >> 8) & 255) + c(n & 255);
+};
+
 export const serif = 'Lora_600SemiBold';
 export const serifReg = 'Lora_400Regular';
 

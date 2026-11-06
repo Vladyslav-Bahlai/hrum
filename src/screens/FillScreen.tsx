@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/RNText';
 import { play } from '../sound';
-import { C, T } from '../theme';
+import { C, T, TABS, shade } from '../theme';
 import { ActBtn, Btn, NumField, Seg } from '../ui/kit';
 import { Icon } from '../ui/Icon';
 import { useToast } from '../ui/Toast';
@@ -11,6 +11,8 @@ import { analyzeFood } from '../ai';
 import { getKey } from '../storage';
 import { FoodItem } from '../types';
 import { addDays, known, plural, todayKey } from '../utils';
+const X = TABS.fill;
+const XD = shade(X.accent, 0.72);
 
 type F = 'kcal' | 'protein' | 'fat' | 'carbs';
 const FIELDS: { k: F; label: string }[] = [
@@ -215,8 +217,8 @@ export function FillScreen({ topInset }: { topInset: number }) {
 
                   {fromLib || ai ? (
                     <View style={st.badge}>
-                      <Icon name={ai ? 'sparkle' : 'star'} size={13} color={C.accent} />
-                      <Text style={{ fontSize: 12.5, color: C.accent, fontWeight: '600' }}>{ai ? 'оценка ИИ — проверьте' : 'подставлено из ваших данных'}</Text>
+                      <Icon name={ai ? 'sparkle' : 'star'} size={13} color={X.accent} />
+                      <Text style={{ fontSize: 12.5, color: X.accent, fontWeight: '600' }}>{ai ? 'оценка ИИ — проверьте' : 'подставлено из ваших данных'}</Text>
                     </View>
                   ) : null}
 
@@ -253,6 +255,6 @@ export function FillScreen({ topInset }: { topInset: number }) {
 const st = StyleSheet.create({
   head: { paddingHorizontal: 20, paddingBottom: 6, backgroundColor: C.paper },
   card: { backgroundColor: C.surface, borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', marginTop: 8, backgroundColor: C.accentSoft, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', marginTop: 8, backgroundColor: X.soft, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10 },
   empty: { backgroundColor: C.surface, borderRadius: 16, padding: 24, marginTop: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
 });

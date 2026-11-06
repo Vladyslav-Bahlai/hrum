@@ -41,6 +41,8 @@ export interface FoodItem {
   explain?: string;
   /** короткое английское название (от ИИ) — для поиска иконки */
   en?: string;
+  /** короткий интересный факт об ингредиентах (от ИИ, для карусели) */
+  fact?: string;
 }
 
 export interface Menu {
@@ -98,7 +100,12 @@ export interface Targets {
 
 export type Provider = 'claude' | 'gemini';
 
+/** Уровень «размышления» ИИ: off — без него. */
+export type AIEffort = 'off' | 'low' | 'medium' | 'high';
+
 export interface AISettings {
+  /** уровень «размышления» для разных задач (не задан — как раньше) */
+  effort?: { eat?: AIEffort; chat?: AIEffort; refine?: AIEffort; menu?: AIEffort };
   provider: Provider;
   claudeModel: string;
   geminiModel: string;
@@ -147,6 +154,8 @@ export interface AppData {
   icons?: IconSettings;
   /** скачанные паки: префикс → размер и когда скачан (сами данные — в файлах) */
   iconPacks?: Record<string, { bytes: number; at: number }>;
+  /** дроби в количестве порции показывать десятичными (0.5 вместо ½) */
+  decimals?: boolean;
   /** кэш онлайн-поиска: ключ блюда → «prefix:name» ('' — не найдено) */
   iconCache?: Record<string, string>;
 }

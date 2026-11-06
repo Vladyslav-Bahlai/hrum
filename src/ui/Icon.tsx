@@ -5,12 +5,13 @@ import { C } from '../theme';
 export type IconName =
   | 'plus' | 'camera' | 'image' | 'send' | 'left' | 'right' | 'down' | 'calendar' | 'chart' | 'gear'
   | 'book' | 'star' | 'starFill' | 'trash' | 'close' | 'check' | 'edit' | 'drop' | 'repeat' | 'search'
-  | 'scale' | 'sparkle' | 'copy' | 'pen' | 'list' | 'expand' | 'up' | 'chat' | 'pin' | 'more';
+  | 'scale' | 'sparkle' | 'copy' | 'pen' | 'list' | 'expand' | 'up' | 'chat' | 'pin' | 'more' | 'grip';
 
 export function Icon({ name, size = 20, color = C.ink, stroke = 1.7 }: { name: IconName; size?: number; color?: string; stroke?: number }) {
   const p = { stroke: color, strokeWidth: stroke, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   let body: React.ReactNode = null;
   switch (name) {
+    case 'grip': body = <Path d="M5 8h14M5 12h14M5 16h14" {...p} />; break;
     case 'plus': body = <Path d="M12 5v14M5 12h14" {...p} />; break;
     case 'camera': body = <><Path d="M4 8h3l1.5-2h7L17 8h3v11H4z" {...p} /><Circle cx="12" cy="13" r="3.5" {...p} /></>; break;
     case 'image': body = <><Rect x="3.5" y="5" width="17" height="14" rx="2" {...p} /><Circle cx="9" cy="10" r="1.6" {...p} /><Path d="M4 17l5-4.5 4 3.5 2.5-2 4.5 3.5" {...p} /></>; break;

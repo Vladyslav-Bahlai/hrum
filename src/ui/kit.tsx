@@ -1,13 +1,17 @@
 import React from 'react';
-import { Keyboard, useWindowDimensions } from 'react-native';
+import { Keyboard, TextInput as RNInput, useWindowDimensions } from 'react-native';
 import {
   Animated, Easing, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInputProps, View, ViewStyle,
 } from 'react-native';
-import { Text, TextInput } from './RNText';
+import { focusBus, Text, TextInput } from './RNText';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, noOutline, RADIUS, T } from '../theme';
+import { C, noOutline, RADIUS, T, TabTone, TABS } from '../theme';
 import { Icon, IconName } from './Icon';
+
+/** Цвета текущей вкладки для общих кнопок/вкладок/чипов (по умолчанию — зелёный дневника). */
+export const ToneCtx = React.createContext<TabTone>(TABS.day);
+export const useTone = () => React.useContext(ToneCtx);
 
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle | ViewStyle[] }) {
   return <View style={[s.card, style as any]}>{children}</View>;
@@ -21,13 +25,14 @@ export function Hair({ style }: { style?: ViewStyle }) {
 export function Tabs<K extends string>({ items, value, onChange, style }: {
   items: { key: K; label: string; n?: number | string }[]; value: K; onChange: (k: K) => void; style?: ViewStyle;
 }) {
+  const tone = useTone();
   return (
     <View style={[{ flexDirection: 'row', gap: 22, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong }, style]}>
       {items.map((it) => {
         const on = it.key === value;
         return (
           <Pressable key={it.key} onPress={() => onChange(it.key)} hitSlop={6}
-            style={{ paddingVertical: 9, borderBottomWidth: 2, borderColor: on ? C.accent : 'transparent', marginBottom: -1 }}>
+            style={{ paddingVertical: 9, borderBottomWidth: 2, borderColor: on ? tone.accent : 'transparent', marginBottom: -1 }}>
             <Text style={[T.body, { fontSize: 14, color: on ? C.ink : C.muted, fontWeight: on ? '600' : '400' }]}>
               {it.label}
               {it.n !== undefined ? <Text style={[T.small, { fontWeight: '400' }]}>  {it.n}</Text> : null}
@@ -58,8 +63,9 @@ export function Seg<K extends string | number>({ items, value, onChange, style, 
 }
 
 export function Chip({ label, on, onPress, small }: { label: string; on?: boolean; onPress?: () => void; small?: boolean }) {
+  const tone = useTone();
   return (
-    <Pressable onPress={onPress} style={[s.chip, small && { paddingHorizontal: 10, paddingVertical: 4 }, on && s.chipOn]}>
+    <Pressable onPress={onPress} style={[s.chip, small && { paddingHorizontal: 10, paddingVertical: 4 }, on && s.chipOn, on && { backgroundColor: tone.accent, borderColor: tone.accent }]}>
       <Text style={[T.body, { fontSize: small ? 13 : 14, color: on ? C.white : C.inkSoft, fontWeight: on ? '600' : '500' }]} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
@@ -68,8 +74,9 @@ export function Chip({ label, on, onPress, small }: { label: string; on?: boolea
 export function Btn({ label, onPress, kind = 'primary', icon, disabled, style }: {
   label: string; onPress?: () => void; kind?: 'primary' | 'ghost' | 'soft' | 'danger'; icon?: IconName; disabled?: boolean; style?: ViewStyle;
 }) {
-  const bg = kind === 'primary' ? C.accent : kind === 'soft' ? C.accentSoft : 'transparent';
-  const fg = kind === 'primary' ? C.white : kind === 'danger' ? C.over : C.accent;
+  const tone = useTone();
+  const bg = kind === 'primary' ? tone.accent : kind === 'soft' ? tone.soft : 'transparent';
+  const fg = kind === 'primary' ? C.white : kind === 'danger' ? C.over : tone.accent;
   return (
     <Pressable onPress={disabled ? undefined : onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [s.btn, { backgroundColor: bg, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 },
@@ -81,12 +88,13 @@ export function Btn({ label, onPress, kind = 'primary', icon, disabled, style }:
 }
 
 /** Крупная вторичная кнопка с иконкой (вместо текстовых ссылок). */
-export function ActBtn({ label, icon, onPress, danger, on, style }: { label: string; icon?: IconName; onPress: () => void; danger?: boolean; on?: boolean; style?: ViewStyle }) {
-  const fg = danger ? C.over : C.accent;
+export function ActBtn({ label, icon, onPress, danger, on, style, textColor }: { label: string; icon?: IconName; onPress: () => void; danger?: boolean; on?: boolean; style?: ViewStyle | ViewStyle[]; textColor?: string }) {
+  const tone = useTone();
+  const fg = textColor || (danger ? C.over : tone.accent);
   return (
     <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={label || undefined}
       style={({ pressed }) => [{ flex: 1, minWidth: 0, minHeight: 48, borderRadius: 12, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12,
-        backgroundColor: danger ? C.overSoft : on ? C.accentSoft : C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: danger ? '#E9C9C0' : C.lineStrong, opacity: pressed ? 0.7 : 1 }, style,
+        backgroundColor: danger ? C.overSoft : on ? tone.soft : tone.tint, borderWidth: StyleSheet.hairlineWidth, borderColor: danger ? '#E9C9C0' : C.lineStrong, opacity: pressed ? 0.7 : 1 }, style,
         // кнопка фиксированной ширины (звезда, корзина): на вебе flex:0 давал нулевую ширину
         (style as any)?.width !== undefined ? { flexBasis: 'auto' as any, flexShrink: 0 } : null]}>
       {icon ? <View style={{ width: 20, height: 20, flexShrink: 0 }}><Icon name={icon} size={20} color={fg} /></View> : null}
@@ -185,15 +193,33 @@ export function useKeyboardHeight() {
   return h;
 }
 
-/** Нижнее окно: затемнение появляется на месте (плавно), а само окно выезжает снизу. */
+/** Окно даёт вложенным блокам возможность «подъехать» к видимой части: reveal(ref) прокручивает блок к верху окна. */
+export const SheetCtx = React.createContext<{ reveal: (node: any, topGap?: number) => void } | null>(null);
+export const useSheetReveal = () => React.useContext(SheetCtx)?.reveal;
+
+/**
+ * Нижнее окно: затемнение появляется на месте (плавно), а само окно выезжает снизу.
+ * Клавиатура: если окно целиком помещается над ней — поднимается целиком (как раньше); если оно высокое,
+ * то остаётся на месте (кнопки внизу не «подпрыгивают» вместе с клавиатурой), а над клавиатурой прокручивается
+ * только само поле ввода.
+ */
 export function Sheet({ visible, onClose, title, children, footer, scrollEnabled = true }: {
   visible: boolean; onClose: () => void; title?: string; children: React.ReactNode; footer?: React.ReactNode; scrollEnabled?: boolean;
 }) {
   const ins = useSafeAreaInsets();
   const kb = useKeyboardHeight();
   const { height: H } = useWindowDimensions();
-  // клавиатура поднимает лист целиком; содержимое прокручивается в оставшемся месте
-  const avail = H - kb - ins.top - 24;
+  const full = H - ins.top - 24;
+  const [contentH, setContentH] = React.useState(0);
+  const [footH, setFootH] = React.useState(0);
+  const scroll = React.useRef<any>(null);
+  const scrollY = React.useRef(0);
+  const kbRef = React.useRef(0); kbRef.current = kb;
+  // окно поднимается целиком, только если и так помещается над клавиатурой
+  const natural = contentH + footH + (title ? 56 : 0) + 56;
+  const lift = kb > 0 && natural + kb <= full ? kb : 0;
+  const stay = kb > 0 && !lift;
+  const avail = full - lift;
   // Modal без своей анимации: фон плавно проявляется на месте, лист выезжает снизу (раньше на iPhone вместе с листом «въезжало» и затемнение)
   const [shown, setShown] = React.useState(visible);
   const a = React.useRef(new Animated.Value(0)).current;
@@ -208,11 +234,38 @@ export function Sheet({ visible, onClose, title, children, footer, scrollEnabled
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   const close = () => (kb ? Keyboard.dismiss() : onClose());
+
+  // поле в фокусе должно быть над клавиатурой
+  const ensureVisible = React.useCallback(() => {
+    const f: any = (RNInput as any).State?.currentlyFocusedInput?.();
+    if (!f?.measureInWindow || !scroll.current) return;
+    f.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+      const limit = H - kbRef.current - 14;
+      if (kbRef.current > 0 && y + h > limit) scroll.current?.scrollTo?.({ y: scrollY.current + (y + h - limit), animated: true });
+    });
+  }, [H]);
+  React.useEffect(() => { if (stay) { const t = setTimeout(ensureVisible, 90); return () => clearTimeout(t); } }, [stay, kb, ensureVisible]);
+  React.useEffect(() => {
+    const f = () => { if (kbRef.current > 0) setTimeout(ensureVisible, 90); };
+    focusBus.add(f);
+    return () => { focusBus.delete(f); };
+  }, [ensureVisible]);
+
+  const reveal = React.useCallback((node: any, topGap = 10) => {
+    if (!node?.measureInWindow || !scroll.current?.measureInWindow) return;
+    scroll.current.measureInWindow((_sx: number, sy: number) => {
+      node.measureInWindow((_x: number, y: number) => {
+        scroll.current?.scrollTo?.({ y: Math.max(0, scrollY.current + (y - sy) - topGap), animated: true });
+      });
+    });
+  }, []);
+  const ctx = React.useMemo(() => ({ reveal }), [reveal]);
+
   return (
     <Modal visible={shown} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <GestureHandlerRootView style={{ flex: 1 }}>
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(16,24,19,0.32)', opacity: a }]} />
-      <View style={{ flex: 1, paddingBottom: kb }}>
+      <View style={{ flex: 1, paddingBottom: lift }}>
         <Pressable accessibilityLabel="Закрыть" style={{ flex: 1 }} onPress={close} />
         <Animated.View style={[s.sheet, { paddingBottom: kb ? 10 : ins.bottom + 10, maxHeight: Math.max(240, avail),
           transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [Math.max(400, H * 0.6), 0] }) }] }]}>
@@ -223,10 +276,15 @@ export function Sheet({ visible, onClose, title, children, footer, scrollEnabled
               <IconBtn name="close" label="Закрыть окно" onPress={onClose} />
             </View>
           ) : null}
-          <ScrollView scrollEnabled={scrollEnabled} keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}>
-            {children}
-          </ScrollView>
-          {footer ? <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>{footer}</View> : null}
+          <SheetCtx.Provider value={ctx}>
+            <ScrollView ref={scroll} scrollEnabled={scrollEnabled} keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }}
+              scrollEventThrottle={16} onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+              onContentSizeChange={(_w, h) => setContentH(h)}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: stay ? kb + 24 : 12 }}>
+              {children}
+            </ScrollView>
+          </SheetCtx.Provider>
+          {footer ? <View onLayout={(e) => setFootH(e.nativeEvent.layout.height)} style={{ paddingHorizontal: 20, paddingTop: 8 }}>{footer}</View> : null}
         </Animated.View>
       </View>
       </GestureHandlerRootView>
@@ -234,12 +292,14 @@ export function Sheet({ visible, onClose, title, children, footer, scrollEnabled
   );
 }
 
-export function Bar({ value, max, color = C.accent, height = 4, style }: { value: number; max: number; color?: string; height?: number; style?: ViewStyle }) {
+export function Bar({ value, max, color, height = 4, style }: { value: number; max: number; color?: string; height?: number; style?: ViewStyle }) {
+  const tone = useTone();
+  const col = color || tone.accent;
   const pct = max > 0 ? Math.min(1, value / max) : 0;
   const over = max > 0 && value > max * 1.05;
   return (
     <View style={[{ height, backgroundColor: C.line, borderRadius: height, overflow: 'hidden' }, style]}>
-      <View style={{ width: `${pct * 100}%`, height, backgroundColor: over ? C.over : color, borderRadius: height }} />
+      <View style={{ width: `${pct * 100}%`, height, backgroundColor: over ? C.over : col, borderRadius: height }} />
     </View>
   );
 }

@@ -4,7 +4,7 @@ import { Text, TextInput } from '../ui/RNText';
 import { buildChatContext, chatName, ChatHit, estimateTokens, searchChats, tokensLabel } from '../chat';
 import { fromCamera, fromGallery, Picked } from '../media';
 import { purgeChatPhotos, useStore } from '../store';
-import { C, noOutline, T } from '../theme';
+import { C, noOutline, T, TABS, shade } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Btn, Empty, Field, IconBtn, Sheet, useKeyboardHeight } from '../ui/kit';
 import { useToast } from '../ui/Toast';
@@ -14,6 +14,8 @@ import { ModelChip, ModelSheet } from './Composer';
 import { AskHint, emptyChatHint, Messages, useAskHint } from './ChatSlot';
 import { askHintVisible } from '../chat';
 import { useChat } from './useChat';
+const X = TABS.chats;
+const XD = shade(X.accent, 0.72);
 
 const when = (t: number) => {
   const d = new Date(t);
@@ -103,10 +105,10 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
               const last = c.messages[c.messages.length - 1];
               const on = c.id === chat.id;
               return (
-                <View key={c.id} style={[s.item, on && { borderColor: C.accent, borderWidth: 1 }]}>
+                <View key={c.id} style={[s.item, on && { borderColor: X.accent, borderWidth: 1 }]}>
                   <Pressable accessibilityLabel={`Открыть чат ${name(c)}`} style={{ flex: 1, paddingVertical: 12, paddingLeft: 14 }} onPress={() => openChat(c.id)}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      {c.pinned ? <Icon name="pin" size={16} color={C.accent} /> : null}
+                      {c.pinned ? <Icon name="pin" size={16} color={X.accent} /> : null}
                       <Text style={[T.h3, { flexShrink: 1 }]} numberOfLines={1}>{name(c)}</Text>
                       {on ? <View style={s.badge}><Text style={s.badgeTxt}>активный</Text></View> : null}
                     </View>
@@ -149,7 +151,7 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
               ))}
             </ScrollView>
           ) : null}
-          <View style={[s.bar, focus && { borderColor: C.accent }]}>
+          <View style={[s.bar, focus && { borderColor: X.accent }]}>
             <PlusBtn onPress={() => setAttachOpen(true)} on={attachOpen} />
             <View style={{ flex: 1, justifyContent: 'center' }}>
               <TextInput
@@ -158,7 +160,7 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
               />
               {hintOn ? <AskHint hint={hint} left={12} top={11} /> : null}
             </View>
-            <Pressable accessibilityLabel="Отправить" onPress={send} style={[s.send, { backgroundColor: canSend ? C.accent : C.line }]}>
+            <Pressable accessibilityLabel="Отправить" onPress={send} style={[s.send, { backgroundColor: canSend ? X.accent : C.line }]}>
               {chat.sending ? <ActivityIndicator color={C.white} /> : <Icon name="send" size={24} color={canSend ? C.white : C.muted} stroke={2.2} />}
             </Pressable>
           </View>
@@ -206,8 +208,8 @@ const s = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, borderRadius: 14, paddingHorizontal: 14, backgroundColor: C.surface, minHeight: 48 },
   item: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, marginTop: 10 },
-  badge: { backgroundColor: C.accentSoft, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
-  badgeTxt: { fontSize: 11, fontWeight: '700', color: C.accentDark },
+  badge: { backgroundColor: X.soft, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
+  badgeTxt: { fontSize: 11, fontWeight: '700', color: XD },
   bar: { flexDirection: 'row', alignItems: 'flex-end', marginHorizontal: 12, marginBottom: 8, padding: 6, gap: 6, backgroundColor: C.surface, borderRadius: 26, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   input: { minHeight: 44, maxHeight: 120, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 11 },
   thumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: C.line },

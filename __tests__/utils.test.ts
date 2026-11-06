@@ -157,7 +157,7 @@ describe('plural / amountLabel / portionLabel', () => {
     expect(amountLabel(0.7)).toBe('×0.7');
   });
   test('portionLabel', () => {
-    expect(portionLabel(1 / 3)).toBe('⅓');
+    expect(portionLabel(1 / 3)).toBe('1/3');
     expect(portionLabel(0.7)).toBe('0.7');
   });
 });

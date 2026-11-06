@@ -51,6 +51,9 @@ let modeReady: Promise<void> | null = null;
 let map: Record<string, string> = {};
 const players: Record<string, AudioPlayer> = {};
 
+let resolveUri: (u: string) => string = (u) => u;
+/** Подставляется приложением: находит свой звук по имени файла в актуальной папке. */
+export const setSoundResolver = (fn: (u: string) => string) => { resolveUri = fn; };
 export const setSoundsEnabled = (v: boolean) => { enabled = v; };
 export const setSoundMap = (m: Record<string, string>) => { map = m || {}; };
 export const setSoundVolume = (v?: string) => {
@@ -72,7 +75,7 @@ async function run(choice: string) {
     await ensureMode();
     let p = players[choice];
     if (!p) {
-      const src = choice.startsWith('file:') ? { uri: choice.slice(5) } : SRC[choice as SoundName];
+      const src = choice.startsWith('file:') ? { uri: resolveUri(choice.slice(5)) } : SRC[choice as SoundName];
       if (!src) return;
       p = createAudioPlayer(src as any);
       players[choice] = p;

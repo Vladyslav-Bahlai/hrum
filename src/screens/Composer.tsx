@@ -19,6 +19,9 @@ import { AskHint, ChatMini, useAskHint } from './ChatSlot';
 import { askHintVisible } from '../chat';
 import { ChatScreen } from './ChatScreen';
 import { AttachSheet, PlusBtn } from './AttachSheet';
+import { ModelPill, ModelPopup } from './ModelPopup';
+import { PresetEditor } from './Dishes';
+import { kcalText } from '../utils';
 import { useChat } from './useChat';
 
 /**
@@ -26,7 +29,9 @@ import { useChat } from './useChat';
  * в панель (чат-слот, любимые блюда, модель ИИ, поле ввода, камера/галерея/вручную) и через ~8 секунд
  * бездействия так же плавно сворачивается обратно. Панель поднимается над клавиатурой.
  */
-export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual, onMenu, onChatOpen, onOpen, chatTop = 110 }: {
+export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset, onManual, onMenu, onChatOpen, onOpen, chatTop = 110 }: {
+  /** отмена запроса ИИ, пока идёт ожидание */
+  onCancel?: () => void;
   /** панель раскрыта (карточка «Выбрать с меню» в ленте на это время исчезает) */
   onOpen?: (open: boolean) => void;
   onManual: () => void;
@@ -51,6 +56,8 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
   const [picking, setPicking] = useState(false);
   const { data } = useStore();
   const [modelOpen, setModelOpen] = useState(false);
+  const [favOpen, setFavOpen] = useState(false); // окно «Избранное»
+  const [presetNew, setPresetNew] = useState(false); // создание избранного блюда прямо отсюда
   const [attachOpen, setAttachOpen] = useState(false);
   const [mode, setMode] = useState<'log' | 'ask'>('log');
   // чат: закрыт / на весь экран / свёрнут в полоску над панелью
@@ -89,10 +96,10 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
 
   useEffect(() => {
     if (!open) return;
-    if (!panelIsIdle({ focus, text, photos: photos.length, busy: busy || chat.sending, sheetOpen: modelOpen || attachOpen || chatView !== 'closed', picking })) return;
+    if (!panelIsIdle({ focus, text, photos: photos.length, busy: busy || chat.sending, sheetOpen: modelOpen || favOpen || presetNew || attachOpen || chatView !== 'closed', picking })) return;
     const id = setTimeout(() => collapseRef.current(), PANEL_IDLE_MS);
     return () => clearTimeout(id);
-  }, [open, focus, text, photos.length, busy, chat.sending, modelOpen, attachOpen, chatView, picking, bump]);
+  }, [open, focus, text, photos.length, busy, chat.sending, modelOpen, favOpen, presetNew, attachOpen, chatView, picking, bump]);
 
   // ---- подъём над клавиатурой (Android в edge-to-edge окно не ужимает) ----
   const kb = useKeyboardHeight();
@@ -158,17 +165,19 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
   // одна кнопка: пусто — «свернуть» (✕), есть текст/фото — «отправить»; иконка меняется плавно
   const sendT = useRef(new Animated.Value(0)).current;
   useEffect(() => { Animated.timing(sendT, { toValue: hasInput ? 1 : 0, duration: 170, easing: Easing.out(Easing.quad), useNativeDriver: false }).start(); }, [hasInput, sendT]);
-  const { showSeg, showChip, showQuick, showSide, buttonInside } = panelParts({ focus, ask, hasQuick: quick.length > 0 });
+  const { showSeg, showChip, showQuick, showSide, buttonInside } = panelParts({ focus, ask, hasQuick: true });
   // при фокусе круглая кнопка «втягивается» в инпут (одна и та же кнопка, меняется только вид)
   const inT = useRef(new Animated.Value(0)).current;
   useEffect(() => { Animated.timing(inT, { toValue: buttonInside ? 1 : 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start(); }, [buttonInside, inT]);
   const outside = () => {
+    if (modelOpen) { setModelOpen(false); return; }
     if (outsideTapAction({ text, photos: photos.length, askMode: ask }) === 'collapse') collapse();
     else Keyboard.dismiss();
   };
   const sideAct = (fn?: () => void) => { collapse(); fn?.(); };
-  const smallPress = () => { if (hasInput) void send(); else collapse(); };
   const sending = ask ? chat.sending : busy;
+  const cancel = () => { if (ask) chat.cancel(); else onCancel?.(); };
+  const smallPress = () => { if (sending) cancel(); else if (hasInput) void send(); else collapse(); };
   const hintOn = ask && askHintVisible({ text, focus, photos: photos.length });
   const hint = useAskHint(hintOn);
 
@@ -179,6 +188,9 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
       <Animated.View pointerEvents="box-none" style={[s.wrap, { bottom: kb + baseBottom }]}>
         {/* большая зелёная кнопка */}
         <Animated.View pointerEvents={open ? 'none' : 'box-none'} style={[s.fabWrap, fabStyle]}>
+          <Pressable testID="fav-btn" accessibilityLabel="Избранные блюда" onPress={() => setFavOpen(true)} style={({ pressed }) => [s.favFab, pressed && { transform: [{ scale: 0.94 }] }]}>
+            <Icon name="starFill" size={24} color={C.fat} />
+          </Pressable>
           <Pressable testID="fab" accessibilityLabel="Добавить еду" onPress={expand} style={({ pressed }) => [s.fab, pressed && { transform: [{ scale: 0.94 }] }]}>
             <Icon name="plus" size={34} color={C.white} stroke={2.4} />
           </Pressable>
@@ -200,6 +212,10 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
               <View style={s.quickWrap}>
                 <GHScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always"
                   contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingRight: 100, paddingVertical: 4 }}>
+                  <Pressable accessibilityLabel={quick.length ? 'Добавить блюдо в избранное' : 'Создать избранное блюдо'} onPress={() => setPresetNew(true)} style={[s.quick, s.quickAdd]}>
+                    <Icon name="plus" size={16} color={C.accent} stroke={2.4} />
+                    {!quick.length ? <Text style={[T.body, { fontSize: 14, fontWeight: '600', marginLeft: 6, color: C.accent }]} numberOfLines={1}>Создать избранное</Text> : null}
+                  </Pressable>
                   {quick.map((q, i) => (
                     <Pressable key={i} onPress={() => { onQuick(q); setBump((x) => x + 1); }} style={s.quick}>
                       <Icon name="starFill" size={13} color={C.fat} />
@@ -220,13 +236,10 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
                   onChange={(m) => { const keep = focus || Date.now() - blurAt.current < 400; setMode(m); setChatView(m === 'ask' ? 'full' : 'closed'); setBump((x) => x + 1); if (keep) setTimeout(() => inputRef.current?.focus(), 0); }} />
               ) : null}
               {showChip ? (
-                <Pressable onPress={() => setModelOpen(true)} style={[s.model, s.modelFocus]} hitSlop={6}>
-                  <Icon name="sparkle" size={14} color={C.accent} />
-                  <Text style={{ color: C.inkSoft, fontSize: 12.5, fontWeight: '600', flexShrink: 1 }} numberOfLines={1} ellipsizeMode="tail">
-                    {model || DEFAULT_MODELS[data.ai.provider]}
-                  </Text>
-                  <Icon name="down" size={12} color={C.muted} />
-                </Pressable>
+                <View style={{ flexShrink: 1 }}>
+                  <ModelPill onPress={() => setModelOpen((x) => !x)} open={modelOpen} />
+                  {modelOpen ? <ModelPopup onClose={() => setModelOpen(false)} style={{ position: 'absolute', left: 0, bottom: 40 }} /> : null}
+                </View>
               ) : null}
             </View>
 
@@ -264,7 +277,7 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
                   {hintOn ? <AskHint hint={hint} /> : null}
                 </View>
                 <Animated.View pointerEvents={buttonInside ? 'auto' : 'none'} style={{ width: inT.interpolate({ inputRange: [0, 1], outputRange: [0, 44] }), height: 44, opacity: inT, overflow: 'hidden' }}>
-                  <ActionDot hasInput={hasInput} sending={sending} sendT={sendT} size={44} onPress={smallPress} label={hasInput ? 'Отправить' : 'Свернуть'} />
+                  <ActionDot hasInput={hasInput} sending={sending} sendT={sendT} size={44} onPress={smallPress} label={sending ? 'Отменить запрос' : hasInput ? 'Отправить' : 'Свернуть'} />
                 </Animated.View>
               </View>
             </Animated.View>
@@ -285,11 +298,12 @@ export function Composer({ busy, onSubmit, quick, onQuick, bottomInset, onManual
 
             {/* малая круглая кнопка на месте большой: свернуть или отправить (при фокусе уходит внутрь инпута) */}
             <Animated.View pointerEvents={buttonInside ? 'none' : 'auto'} style={[s.small, { opacity: inT.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), transform: [{ scale: inT.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }] }]}>
-              <ActionDot hasInput={hasInput} sending={sending} sendT={sendT} size={52} onPress={smallPress} label={hasInput ? 'Отправить' : 'Свернуть'} />
+              <ActionDot hasInput={hasInput} sending={sending} sendT={sendT} size={52} onPress={smallPress} label={sending ? 'Отменить запрос' : hasInput ? 'Отправить' : 'Свернуть'} />
             </Animated.View>
           </Animated.View>
         ) : null}
-        <ModelSheet visible={modelOpen} onClose={() => setModelOpen(false)} />
+        {favOpen ? <FavoritesSheet items={quick} onClose={() => setFavOpen(false)} onPick={(it) => { setFavOpen(false); onQuick(it); }} onNew={() => { setFavOpen(false); setPresetNew(true); }} /> : null}
+        {presetNew ? <PresetEditor visible onClose={() => setPresetNew(false)} /> : null}
         <AttachSheet visible={attachOpen} onClose={() => setAttachOpen(false)} tiles={[
           { key: 'camera', label: 'Камера', icon: 'camera', onPress: () => { void add('camera'); } },
           { key: 'gallery', label: 'Галерея', icon: 'image', onPress: () => { void add('gallery'); } },
@@ -311,7 +325,12 @@ function ActionDot({ hasInput, sending, sendT, size, onPress, label }: { hasInpu
   return (
     <Pressable testID="action-dot" accessibilityLabel={label} onPress={onPress} style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, overflow: 'hidden' }}>
       <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: sendT.interpolate({ inputRange: [0, 1], outputRange: [C.surface, C.accent] }) }]} />
-      {sending ? <ActivityIndicator color={hasInput ? C.white : C.accent} /> : (
+      {sending ? (
+        <>
+          <ActivityIndicator color={C.accent} style={{ position: 'absolute' }} />
+          <View accessibilityLabel="Отменить запрос" style={{ width: size * 0.26, height: size * 0.26, borderRadius: 3, backgroundColor: C.accent }} />
+        </>
+      ) : (
         <>
           <Animated.View style={{ position: 'absolute', opacity: sendT.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), transform: [{ rotate: sendT.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-90deg'] }) }] }}>
             <Icon name="close" size={22} color={C.inkSoft} stroke={2.2} />
@@ -322,6 +341,22 @@ function ActionDot({ hasInput, sending, sendT, size, onPress, label }: { hasInpu
         </>
       )}
     </Pressable>
+  );
+}
+
+/** Окно «Избранное»: блюда со звездой — тап добавляет в дневник; сверху — создать новое. */
+function FavoritesSheet({ items, onClose, onPick, onNew }: { items: FoodItem[]; onClose: () => void; onPick: (i: FoodItem) => void; onNew: () => void }) {
+  return (
+    <Sheet visible onClose={onClose} title="Избранные блюда">
+      <ActBtn label="Создать избранное блюдо" icon="plus" onPress={onNew} style={{ flex: 0, marginBottom: 8 }} />
+      {items.length ? items.map((q, i) => (
+        <Pressable key={i} onPress={() => onPick(q)} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line }, pressed && { backgroundColor: C.accentTint }]}>
+          <Icon name="starFill" size={15} color={C.fat} />
+          <Text style={[T.body, { flex: 1, fontWeight: '500' }]} numberOfLines={2}>{q.name}</Text>
+          <Text style={[T.small, T.num]}>{kcalText(q)}</Text>
+        </Pressable>
+      )) : <Text style={[T.small, { textAlign: 'center', paddingVertical: 22 }]}>Избранных блюд пока нет — создайте первое.</Text>}
+    </Sheet>
   );
 }
 
@@ -382,12 +417,17 @@ export function ModelSheet({ visible, onClose }: { visible: boolean; onClose: ()
 
 const s = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, minHeight: 68 },
-  fabWrap: { position: 'absolute', right: 18, bottom: 0, alignItems: 'flex-end' },
+  fabWrap: { position: 'absolute', right: 18, bottom: 0, alignItems: 'center' },
   fab: {
     width: 68, height: 68, borderRadius: 34, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
     shadowColor: '#0F2A1C', shadowOpacity: 0.28, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 10,
   },
   quickWrap: { marginBottom: 6 },
+  favFab: {
+    width: 48, height: 48, borderRadius: 24, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, shadowColor: '#0F2A1C', shadowOpacity: 0.16, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6,
+  },
+  quickAdd: { borderStyle: 'dashed', borderColor: C.accent, backgroundColor: C.accentTint, paddingHorizontal: 12 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 16, marginRight: 80, marginBottom: 8 },
   side: { position: 'absolute', right: 14, bottom: 68, gap: 10, alignItems: 'center' },
   circle: {

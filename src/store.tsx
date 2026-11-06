@@ -1,12 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppData, Chat, ChatMsg, ChatSettings, Entry, FoodItem, IconRef, IconSettings, MealDef, Menu, Profile, TargetRecord, Targets, WeightPoint } from './types';
-import { calcTargets, DEFAULT_MEALS, setMealsConfig } from './utils';
+import { calcTargets, DEFAULT_MEALS, setDecimalMode, setMealsConfig } from './utils';
 import * as L from './logic';
 import * as CH from './chat';
-import { deletePhoto, loadData, saveData } from './storage';
+import { deletePhoto, loadData, resolveSoundUri, saveData } from './storage';
 import { DEFAULT_MODELS } from './ai';
 import { defaultIconSettings } from './iconify';
-import { setSoundMap, setSoundsEnabled, setSoundVolume } from './sound';
+import { setSoundMap, setSoundResolver, setSoundsEnabled, setSoundVolume } from './sound';
 
 const defaultProfile: Profile = { name: '', sex: 'male', age: 30, height: 178, weight: 80, activity: 1.375, goal: 'lose' };
 
@@ -92,6 +92,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { setSoundMap(data.soundMap || {}); }, [data.soundMap]);
   useEffect(() => { setSoundVolume(data.soundVolume); }, [data.soundVolume]);
   useEffect(() => { setMealsConfig(data.meals); }, [data.meals]);
+  useEffect(() => { setDecimalMode(data.decimals); }, [data.decimals]);
+  useEffect(() => { setSoundResolver(resolveSoundUri); }, []);
   useEffect(() => {
     loadData().then((d) => {
       if (d) {

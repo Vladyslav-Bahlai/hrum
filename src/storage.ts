@@ -24,6 +24,17 @@ function ensureDirs() {
   if (!p.exists) p.create({ intermediates: true, idempotent: true });
 }
 
+/** Читает и разбирает файл данных; null — нет файла или он повреждён. */
+async function readJson(f: File): Promise<Partial<AppData> | null> {
+  try {
+    if (!f.exists) return null;
+    const j = JSON.parse(await f.text());
+    return j && typeof j === 'object' ? j : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadData(): Promise<Partial<AppData> | null> {
   // CI-сборка с демо-данными (EXPO_PUBLIC_DEMO=1): каждый запуск — с чистыми демо-данными
   if (DEMO) return demoData();
@@ -33,9 +44,11 @@ export async function loadData(): Promise<Partial<AppData> | null> {
       return s ? JSON.parse(s) : null;
     }
     ensureDirs();
-    const f = dataFile();
-    if (!f.exists) return null;
-    return JSON.parse(await f.text());
+    // Основной файл; если приложение убили посреди замены файла (iPhone усыпляет его почти мгновенно),
+    // берём полностью записанную новую копию или предыдущую — настройки больше не «обнуляются».
+    const main = await readJson(dataFile());
+    if (main) return main;
+    return (await readJson(new File(root(), 'data.tmp.json'))) || (await readJson(new File(root(), 'data.bak.json')));
   } catch (e) {
     console.warn('loadData', e);
     return null;
@@ -60,10 +73,30 @@ export function saveData(data: AppData) {
       tmp.create();
       await tmp.write(json);
       const f = dataFile();
-      if (f.exists) f.delete();
+      const bak = new File(root(), 'data.bak.json');
+      // старый файл не удаляем, а откладываем в .bak: в любой момент на диске есть целая копия данных
+      if (bak.exists) bak.delete();
+      if (f.exists) f.moveSync(bak);
       tmp.moveSync(f);
+      if (bak.exists) bak.delete();
     })
     .catch((e) => console.warn('saveData', e));
+}
+
+/**
+ * Свой звук хранится как абсолютный адрес файла в папке приложения. На iPhone путь к контейнеру приложения
+ * меняется (переустановка, обновление) — тогда звук «пропадал». Находим файл по имени в текущей папке звуков.
+ */
+export function resolveSoundUri(uri: string): string {
+  if (isWeb) return uri;
+  try {
+    const name = decodeURIComponent(uri.split('/').pop() || '');
+    if (!name) return uri;
+    const f = new File(new Directory(root(), 'sounds'), name);
+    return f.exists ? f.uri : uri;
+  } catch {
+    return uri;
+  }
 }
 
 /** Копирует фото из кэша пикера в постоянную папку приложения. */

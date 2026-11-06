@@ -78,11 +78,21 @@ export const PORTIONS: { v: number; label: string }[] = [
   { v: 1, label: '1' },
   { v: 1.25, label: '1¼' },
   { v: 1.5, label: '1½' },
+  { v: 1.75, label: '1¾' },
   { v: 2, label: '2' },
 ];
+/** Режим «десятичные числа вместо дробей» (настройка): 0.5 вместо ½, целые остаются целыми. */
+let decimalMode = false;
+export const setDecimalMode = (v?: boolean) => { decimalMode = !!v; };
+export const decimalOn = () => decimalMode;
+/** Число без лишних нулей: 1 → «1», 0.5 → «0.5», 0.333 → «0.33» (никаких «3.00»). */
+export const numLabel = (v: number): string => String(Math.round(v * 100) / 100);
+/** ⅓/⅔ в разных шрифтах выглядят по-разному — в тексте пишем «1/3», «2/3»; ¼ ½ ¾ везде рисуются одинаково. */
+export const plainFrac = (l: string) => l.replace('⅓', '1/3').replace('⅔', '2/3');
 export const portionLabel = (p: number) => {
+  if (decimalMode) return numLabel(p);
   const f = PORTIONS.find((x) => Math.abs(x.v - p) < 0.01);
-  return f ? f.label : (Math.round(p * 100) / 100).toString();
+  return f ? plainFrac(f.label) : (Math.round(p * 100) / 100).toString();
 };
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && isFinite(v);
@@ -202,7 +212,7 @@ export const mealFromSection = (section?: string): MealType | undefined => {
 /** «½ порции», «200 г» или «×0.7» — как понятнее. */
 export const amountLabel = (portion: number, grams?: number) => {
   const f = PORTIONS.find((x) => Math.abs(x.v - portion) < 0.01);
-  if (f) return f.v === 1 ? '1 порция' : `${f.label} порции`;
+  if (f) return f.v === 1 ? '1 порция' : `${decimalMode ? numLabel(f.v) : plainFrac(f.label)} порции`;
   if (grams) return `${Math.round(grams * portion)} г`;
   return `×${Math.round(portion * 100) / 100}`;
 };

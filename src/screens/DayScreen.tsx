@@ -5,13 +5,14 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Text } from '../ui/RNText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { play } from '../sound';
-import { C, T } from '../theme';
+import { C, shade, T, TABS } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Bar, Btn, IconBtn, Sheet, Unk, useKeyboardHeight } from '../ui/kit';
 import { closeOpenRow, SwipeRow } from '../ui/SwipeRow';
 import { useToast } from '../ui/Toast';
 import { useStore } from '../store';
-import { analyzeFood } from '../ai';
+import { analyzeFood, isCancelled } from '../ai';
+import { DayTitle } from '../ui/DayTitle';
 import { getKey, persistPhoto } from '../storage';
 import { Picked } from '../media';
 import { Entry, FoodItem, MealType } from '../types';
@@ -30,6 +31,7 @@ import { FillScreen } from './FillScreen';
 import { StatsScreen } from './StatsScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { Menu } from '../types';
+import { ToneCtx } from '../ui/kit';
 
 type Review =
   | { mode: 'ai' | 'manual'; drafts: Draft[]; comment?: string; photo?: string; source: Entry['source']; meal?: MealType }
@@ -51,6 +53,7 @@ export function DayScreen() {
     return () => { a.remove(); b.remove(); };
   }, []);
   const [busy, setBusy] = useState(false);
+  const aiCtl = useRef<AbortController | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [calOpen, setCalOpen] = useState(false);
   const [iconFor, setIconFor] = useState<FoodItem | null>(null);
@@ -119,7 +122,7 @@ export function DayScreen() {
   const slideKey = dayMenus.map((m) => m.id + ':' + m.items.length + ':' + (m.closed || []).join('|')).join(',') + '@' + date + '#' + menuLeft;
   const slides = useMemo(() => carouselSlides(dayMenus, data.entries, date), [slideKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const chooseFromMenu = () => {
-    if (dayMenus.length) setTab('menu');
+    if (dayMenus.length) { setMenuReq(undefined); setTab('menu'); } // обычный переход во вкладку «Меню» (без устаревшего запроса «добавить меню»)
     else setChooseOpen(true);
   };
   const askMenu = (kind: 'attach' | 'upload' | 'manual') => { setChooseOpen(false); setMenuReq({ n: Date.now(), kind }); setTab('menu'); };
@@ -154,8 +157,10 @@ export function DayScreen() {
       return true;
     }
     setBusy(true);
+    const ctl = new AbortController();
+    aiCtl.current = ctl;
     try {
-      const res = await analyzeFood(data.ai, key, text, photos.map((p) => ({ base64: p.base64, mime: p.mime })), { mode: 'eat', menus: data.menus.filter((m) => m.dates.includes(date)), presets: data.favorites.map((f) => f.item) });
+      const res = await analyzeFood(data.ai, key, text, photos.map((p) => ({ base64: p.base64, mime: p.mime })), { mode: 'eat', menus: data.menus.filter((m) => m.dates.includes(date)), presets: data.favorites.map((f) => f.item), signal: ctl.signal });
       if (!res.items.length) {
         Alert.alert('Еда не найдена', res.comment || 'Попробуйте описать блюдо подробнее.');
         return false;
@@ -173,15 +178,19 @@ export function DayScreen() {
       });
       return true;
     } catch (e: any) {
+      // отмена — не ошибка: тихо возвращаем текст в поле
+      if (isCancelled(e)) return false;
       Alert.alert('Не получилось', e?.message || String(e), [
         { text: 'Ввести вручную', onPress: () => setReview({ mode: 'manual', source: 'manual', drafts: [{ item: { name: text }, portion: 1, on: true }] }) },
         { text: 'OK' },
       ]);
       return false;
     } finally {
+      aiCtl.current = null;
       setBusy(false);
     }
   };
+  const cancelAI = () => aiCtl.current?.abort();
 
   const menuIdFor = (name: string) => {
     const n = name.trim().toLowerCase();
@@ -210,6 +219,21 @@ export function DayScreen() {
         return last ? { ...d, entries: d.entries.filter((e) => e !== last) } : d;
       });
     } });
+  };
+
+  /** Обновить в дневнике блюдо, добавленное из меню (порция / уточнённая версия). */
+  const updateFromMenu = (id: string, item: FoodItem, portion: number) => {
+    const old = data.entries.find((e) => e.id === id);
+    if (!old) return;
+    store.updateEntry(id, { item, portion });
+    play('add');
+    toast({ text: `Обновлено в дневнике: ${item.name}`, action: 'Отменить', onAction: () => store.updateEntry(id, { item: old.item, portion: old.portion }) });
+  };
+  /** Убрать с дневника блюдо, добавленное из меню (с возможностью вернуть). */
+  const removeFromMenu = (e: Entry) => {
+    play('remove');
+    store.removeEntry(e.id);
+    toast({ text: `Убрано из дневника: ${e.item.name}`, action: 'Вернуть', onAction: () => store.restoreEntry(e) });
   };
 
   const addAllFromMenu = (items: FoodItem[], menu: Menu) => {
@@ -273,9 +297,13 @@ export function DayScreen() {
   const navBottom = Math.max(ins.bottom, 10);
   const pct = tg.kcal ? tot.kcal / tg.kcal : 0;
   const isToday = date === todayKey();
+  const tone = TABS[tab];
+  // сегодняшний день светлее, вчера/завтра — чуть темнее: дни различимы с первого взгляда
+  const paper = tab === 'day' || tab === 'menu' ? (isToday ? tone.paper : shade(tone.paper)) : tone.paper;
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.paper }}>
+    <ToneCtx.Provider value={tone}>
+    <View style={{ flex: 1, backgroundColor: paper }}>
       {tab === 'fill' ? (
         <View style={{ flex: 1, paddingBottom: kbH }}><FillScreen topInset={ins.top} /></View>
       ) : tab === 'stats' || tab === 'settings' ? (
@@ -290,27 +318,32 @@ export function DayScreen() {
       ) : tab === 'menu' ? (
         <GestureDetector gesture={swipe}>
           <Animated.View collapsable={false} style={pageStyle}>
-            <MenuScreen date={date} go={go} canNext={date < today} openCalendar={() => setCalOpen(true)} topInset={ins.top} bottom={kbH ? kbH : navBottom + 70} request={menuReq} onAdd={addFromMenu} onAddAll={addAllFromMenu} onAddDish={quickAdd} />
+            <MenuScreen date={date} go={go} canNext={date < today} openCalendar={() => setCalOpen(true)} topInset={ins.top} bottom={kbH ? kbH : navBottom + 70} request={menuReq} onAdd={addFromMenu} onAddAll={addAllFromMenu} onAddDish={quickAdd} onUpdateEntry={updateFromMenu} onRemoveEntry={removeFromMenu} onRequestDone={() => setMenuReq(undefined)} />
           </Animated.View>
         </GestureDetector>
       ) : (
       <>
       {/* шапка */}
-      <View style={[st.top, { paddingTop: ins.top + 6 }]}>
+      <View style={[st.top, { paddingTop: ins.top + 6, backgroundColor: paper }]}>
         <IconBtn name="left" onPress={() => go(-1)} size={24} />
-        <Pressable onPress={() => setCalOpen(true)} style={{ flex: 1, alignItems: 'center', paddingVertical: 4 }} hitSlop={6}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-            <Text style={T.h2} numberOfLines={1}>{humanDate(date)}</Text>
-            <Icon name="calendar" size={17} color={C.muted} />
-          </View>
-          {!isToday ? <Text style={[T.small, { color: C.accent }]}>вернуться к сегодня — «Дневник»</Text> : null}
-        </Pressable>
+        <DayTitle date={date} onPress={() => setCalOpen(true)} tab="day" />
         <IconBtn name="right" label="Следующий день" onPress={() => go(1)} size={24} color={isToday ? C.line : C.inkSoft} style={isToday ? { opacity: 0.35 } : undefined} />
       </View>
 
       <GestureDetector gesture={swipe}>
       <Animated.View collapsable={false} style={pageStyle}>
         <ScrollView contentContainerStyle={{ paddingBottom: 210 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScrollBeginDrag={closeOpenRow} onTouchStart={closeOpenRow}>
+          {/* «витрина» меню дня: название блюда и короткий факт; тап — переход во вкладку «Меню» */}
+          <Pressable testID="menu-ad" onPress={chooseFromMenu} accessibilityLabel="Меню на этот день" style={({ pressed }) => [st.ad, !dayMenus.length && st.adEmpty, pressed && { opacity: 0.8 }]}>
+            {slides.length ? (
+              <MenuAd slides={slides} multi={dayMenus.length > 1} />
+            ) : dayMenus.length ? (
+              <Text style={[T.body, { color: TABS.menu.accent, fontWeight: '600' }]}>Всё меню дня отмечено ✓ · открыть →</Text>
+            ) : (
+              <Text style={[T.body, { color: TABS.menu.accent, fontWeight: '600' }]}>Меню на этот день пока нет · добавить →</Text>
+            )}
+          </Pressable>
+
           {/* итог дня */}
           <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
@@ -362,22 +395,6 @@ export function DayScreen() {
             </Pressable>
           </View>
 
-          {/* выбор блюда из меню дня (при раскрытой панели «+» карточка остаётся на месте) */}
-          <View>
-          <Pressable onPress={chooseFromMenu} style={({ pressed }) => [st.next, pressed && { opacity: 0.75 }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={T.h3}>Выбрать с меню</Text>
-              {slides.length ? <MenuAd slides={slides} multi={dayMenus.length > 1} /> : null}
-              <Text style={[T.small, { marginTop: slides.length ? 6 : 3 }]}>
-                {dayMenus.length
-                  ? `${dayMenus.length === 1 ? 'Меню на этот день' : `Меню на этот день: ${dayMenus.length}`} · осталось блюд: ${menuLeft}`
-                  : 'Меню на этот день пока нет — добавить'}
-              </Text>
-            </View>
-            <View style={st.nextPlus}><Icon name={dayMenus.length ? 'list' : 'plus'} size={26} color={C.white} stroke={2.2} /></View>
-          </Pressable>
-          </View>
-
           {/* приёмы пищи */}
           {entries.length === 0 ? (
             <View style={{ paddingHorizontal: 28, paddingTop: 36, alignItems: 'center' }}>
@@ -416,19 +433,19 @@ export function DayScreen() {
       </>
       )}
 
-      {tab === 'day' ? <Composer onOpen={onComposerOpen} onChatOpen={onChatOpen} onMenu={chooseFromMenu} busy={busy} onSubmit={submit} quick={quick} onQuick={quickAdd} bottomInset={kb ? 8 : navBottom + 72} chatTop={ins.top + 72}
+      {tab === 'day' ? <Composer onOpen={onComposerOpen} onChatOpen={onChatOpen} onMenu={chooseFromMenu} busy={busy} onSubmit={submit} onCancel={cancelAI} quick={quick} onQuick={quickAdd} bottomInset={kb ? 8 : navBottom + 72} chatTop={ins.top + 72}
         onManual={() => setReview({ mode: 'manual', source: 'manual', drafts: [{ item: { name: '' }, portion: 1, on: true }] })} /> : null}
 
       {DEMO ? <KbDebug /> : null}
       {/* плавающая навигация */}
       {!kb ? (
         <View style={[st.nav, { bottom: navBottom }]}>
-          <NavBtn icon="book" label="Дневник" on={tab === 'day'} onPress={() => { if (tab === 'day') setDate(todayKey()); setTab('day'); }} />
-          <NavBtn icon="list" label="Меню" on={tab === 'menu'} onPress={() => setTab('menu')} />
-          <NavBtn icon="pen" label="Дополнить" on={tab === 'fill'} badge={gaps} onPress={() => setTab('fill')} />
-          <NavBtn icon="chart" label="Статистика" on={tab === 'stats'} onPress={() => setTab('stats')} />
-          <NavBtn icon="chat" label="Чаты" on={tab === 'chats'} onPress={() => setTab('chats')} />
-          <NavBtn icon="gear" label="Настройки" on={tab === 'settings'} onPress={() => setTab('settings')} />
+          <NavBtn icon="book" tone={TABS.day.accent} label="Дневник" on={tab === 'day'} onPress={() => { if (tab === 'day') setDate(todayKey()); setTab('day'); }} />
+          <NavBtn icon="list" tone={TABS.menu.accent} label="Меню" on={tab === 'menu'} onPress={() => setTab('menu')} />
+          <NavBtn icon="pen" tone={TABS.fill.accent} label="Дополнить" on={tab === 'fill'} badge={gaps} onPress={() => setTab('fill')} />
+          <NavBtn icon="chart" tone={TABS.stats.accent} label="Статистика" on={tab === 'stats'} onPress={() => setTab('stats')} />
+          <NavBtn icon="chat" tone={TABS.chats.accent} label="Чаты" on={tab === 'chats'} onPress={() => setTab('chats')} />
+          <NavBtn icon="gear" tone={TABS.settings.accent} label="Настройки" on={tab === 'settings'} onPress={() => setTab('settings')} />
         </View>
       ) : null}
 
@@ -446,6 +463,7 @@ export function DayScreen() {
           onDelete={review.mode === 'edit' ? () => { const e = review.entry; setReview(null); remove(e); } : undefined}
           isFav={store.isFavorite}
           onFav={store.toggleFavorite}
+          date={date}
         />
       ) : null}
       {chooseOpen ? (
@@ -459,6 +477,7 @@ export function DayScreen() {
       {iconFor ? <IconPicker item={iconFor} onClose={() => setIconFor(null)} /> : null}
       {calOpen ? <CalendarSheet visible onClose={() => setCalOpen(false)} value={date} onPick={(k) => setDate(clampDay(k, todayKey()))} /> : null}
     </View>
+    </ToneCtx.Provider>
   );
 }
 
@@ -506,16 +525,16 @@ function EntryRow({ e, onPress, onLongPress, delayLongPress, rowOpen, onCloseRow
   );
 }
 
-function NavBtn({ icon, label, on, onPress, badge }: { icon: any; label: string; on?: boolean; onPress: () => void; badge?: number }) {
+function NavBtn({ icon, label, on, onPress, badge, tone }: { icon: any; label: string; on?: boolean; onPress: () => void; badge?: number; tone: string }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [st.navBtn, pressed && { opacity: 0.6 }]} hitSlop={4}>
       <View>
-        <Icon name={icon} size={23} color={on ? C.accent : C.inkSoft} stroke={on ? 2 : 1.7} />
+        <Icon name={icon} size={23} color={on ? tone : C.inkSoft} stroke={on ? 2 : 1.7} />
         {badge ? (
           <View style={st.badge}><Text style={{ fontSize: 10, fontWeight: '700', color: C.white }}>{badge > 99 ? '99+' : badge}</Text></View>
         ) : null}
       </View>
-      <Text style={{ fontSize: 10, marginTop: 2, color: on ? C.accent : C.muted, fontWeight: on ? '700' : '500' }} numberOfLines={1}>{label}</Text>
+      <Text style={{ fontSize: 10, marginTop: 2, color: on ? tone : C.muted, fontWeight: on ? '700' : '500' }} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -532,8 +551,8 @@ const st = StyleSheet.create({
     position: 'absolute', left: 12, right: 12, height: 60, borderRadius: 30, flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.97)',
     borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, shadowColor: '#0F2A1C', shadowOpacity: 0.1, shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 6,
   },
-  next: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, padding: 14, borderRadius: 14, backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, gap: 12 },
-  nextPlus: { width: 54, height: 54, borderRadius: 27, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+  ad: { marginHorizontal: 16, marginTop: 6, padding: 14, borderRadius: 16, backgroundColor: TABS.menu.tint, borderWidth: 1, borderColor: '#E4D8B4' },
+  adEmpty: { borderStyle: 'dashed', paddingVertical: 16, alignItems: 'center' },
   unkNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: C.line },
   unkDot: { width: 20, height: 20, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: C.muted, alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', top: -5, right: -12, minWidth: 17, height: 17, borderRadius: 9, paddingHorizontal: 4, backgroundColor: C.muted, alignItems: 'center', justifyContent: 'center' },

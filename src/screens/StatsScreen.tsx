@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from '../ui/RNText';
-import { C, T } from '../theme';
+import { C, T, TABS, shade } from '../theme';
 import { ActBtn, Btn, Hair, NumField, Seg, Sheet, Unk } from '../ui/kit';
 import { Icon } from '../ui/Icon';
 import { DayBars, Legend, LineChart, SplitBar } from '../ui/charts';
@@ -9,6 +9,8 @@ import { useStore } from '../store';
 import { Entry } from '../types';
 import { dayTarget } from '../logic';
 import { addDays, fmt, fromKey, hasAnyMacros, known, kcalOf, getMeals, nut, r0, r1, shortDate, sum, todayKey, WD_SHORT, plural } from '../utils';
+const X = TABS.stats;
+const XD = shade(X.accent, 0.72);
 
 type Period = 7 | 30 | 90;
 
@@ -104,15 +106,15 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
 
       {/* полнота данных — сразу видно, насколько можно доверять цифрам ниже */}
       {s.count ? (
-        <View style={[st.complete, incomplete ? null : { backgroundColor: C.accentTint }]}>
+        <View style={[st.complete, incomplete ? null : { backgroundColor: X.tint }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <View style={st.qDot}><Text style={{ fontSize: 12, fontWeight: '700', color: incomplete ? C.muted : C.accent }}>{incomplete ? '?' : '✓'}</Text></View>
+            <View style={st.qDot}><Text style={{ fontSize: 12, fontWeight: '700', color: incomplete ? C.muted : X.accent }}>{incomplete ? '?' : '✓'}</Text></View>
             <Text style={[T.body, { flex: 1, fontWeight: '600' }]}>
               {incomplete ? `Данные полные на ${completePct}%` : 'Все записи с полными данными'}
             </Text>
           </View>
           <View style={st.cBar}>
-            <View style={{ flex: Math.max(completePct, 0.01), backgroundColor: C.accent }} />
+            <View style={{ flex: Math.max(completePct, 0.01), backgroundColor: X.accent }} />
             {incomplete ? <View style={{ flex: 100 - completePct, backgroundColor: C.line }} /> : null}
           </View>
           {incomplete ? (
@@ -137,7 +139,7 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
         <Stat label="В среднем" value={fmt(s.avg)} unk={!!s.unk.kcal} unit="ккал/день" />
         <Stat label="В норме" value={`${s.inNorm}`} unit={`из ${s.full} ${plural(s.full, 'дня', 'дней', 'дней')}`}
           note={s.partialDays ? `+ ${s.partialDays} ${plural(s.partialDays, 'день', 'дня', 'дней')} без части данных` : undefined} />
-        <Stat label="Баланс" value={(s.balance > 0 ? '+' : '') + fmt(s.balance)} unit="ккал к норме" tone={s.balance > 0 ? C.over : C.accent}
+        <Stat label="Баланс" value={(s.balance > 0 ? '+' : '') + fmt(s.balance)} unit="ккал к норме" tone={s.balance > 0 ? C.over : X.accent}
           note={s.partialDays ? 'дни с пробелами не считаются' : undefined} />
         <Stat label="Подряд" value={`${s.streak}`} unit={plural(s.streak, 'день с записями', 'дня с записями', 'дней с записями')} />
       </View>
@@ -179,10 +181,10 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
       {/* приёмы пищи */}
       <View style={st.block}>
         <Text style={[T.h3, { marginBottom: 12 }]}>Когда вы едите</Text>
-        <SplitBar parts={s.meals.map((m, i) => ({ v: m.kcal, color: [C.accent, '#6F9C7F', '#A9C4AE', C.fat][i] }))} />
+        <SplitBar parts={s.meals.map((m, i) => ({ v: m.kcal, color: [X.accent, '#6F9C7F', '#A9C4AE', C.fat][i] }))} />
         <View style={{ marginTop: 10 }}>
           <Legend items={s.meals.map((m, i) => ({
-            color: [C.accent, '#6F9C7F', '#A9C4AE', C.fat][i],
+            color: [X.accent, '#6F9C7F', '#A9C4AE', C.fat][i],
             label: `${m.label} ${r0((m.kcal / s.mealsTotal) * 100)}%${m.unk ? ` +? (${m.unk} без ккал)` : ''}`,
           }))} />
         </View>
@@ -199,7 +201,7 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
             <View key={d.w} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7 }}>
               <Text style={[T.small, { width: 28 }]}>{WD_SHORT[d.w]}</Text>
               <View style={{ flex: 1, height: 8, backgroundColor: C.line, borderRadius: 4, overflow: 'hidden' }}>
-                <View style={{ width: `${Math.min(100, (d.avg / (tg.kcal * 1.4)) * 100)}%`, height: 8, backgroundColor: d.avg > tg.kcal * 1.05 ? C.over : C.accent, borderRadius: 4 }} />
+                <View style={{ width: `${Math.min(100, (d.avg / (tg.kcal * 1.4)) * 100)}%`, height: 8, backgroundColor: d.avg > tg.kcal * 1.05 ? C.over : X.accent, borderRadius: 4 }} />
               </View>
               <Text style={[T.small, T.num, { width: 64, textAlign: 'right' }]}>{d.avg || d.unk ? fmt(d.avg) : '—'}{d.unk ? <Unk /> : null}</Text>
             </View>
@@ -212,7 +214,7 @@ export function StatsScreen({ onFill }: { onFill?: () => void }) {
         <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 10 }}>
           <Text style={[T.h3, { flex: 1 }]}>Вес</Text>
           {weights.length >= 2 ? (
-            <Text style={[T.small, { color: wDelta <= 0 ? C.accent : C.over, fontWeight: '600' }]}>{wDelta > 0 ? '+' : ''}{r1(wDelta)} кг</Text>
+            <Text style={[T.small, { color: wDelta <= 0 ? X.accent : C.over, fontWeight: '600' }]}>{wDelta > 0 ? '+' : ''}{r1(wDelta)} кг</Text>
           ) : null}
         </View>
         {weights.length >= 2 ? (
@@ -325,5 +327,5 @@ const st = StyleSheet.create({
   block: { marginTop: 26 },
   line: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   step: { width: 52, height: 48, borderRadius: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, alignItems: 'center', justifyContent: 'center' },
-  stepT: { fontSize: 24, color: C.accent },
+  stepT: { fontSize: 24, color: X.accent },
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { chatWithAI, DEFAULT_PHOTO_QUESTION } from '../ai';
+import { chatWithAI, DEFAULT_PHOTO_QUESTION, isCancelled } from '../ai';
 import { Picked } from '../media';
 import { activeChatId, buildChatContext, chatDayKey, chatName, ChatOverride, chatSettings, newChatId, newMsg, requestTurns } from '../chat';
 import { play } from '../sound';
@@ -27,6 +27,7 @@ export function useChat() {
   const messages: ChatMsg[] = chat?.messages || [];
   const ref = useRef(data); ref.current = data;
   const sendingRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   // наступил новый день — переопределение сбрасывается, активен чат нового дня
   useEffect(() => { if (override && override.day !== dayId) setShared(null); }, [override, dayId]);
@@ -45,23 +46,29 @@ export function useChat() {
     store.appendChatMsg(chatId, question);
     sendingRef.current = true;
     setSending(true);
+    const ctl = new AbortController();
+    abortRef.current = ctl;
     let ok = true;
     try {
       const key = await getKey(d0.ai.provider);
       if (!key) throw new Error('Чтобы ИИ отвечал, добавьте ключ в настройках.');
-      const answer = await chatWithAI(d0.ai, key, requestTurns(prev, question, set.ctx.history), buildChatContext(ref.current, new Date(), set.ctx), photos.filter((p) => p.base64).map((p) => ({ base64: p.base64, mime: p.mime })));
+      const answer = await chatWithAI(d0.ai, key, requestTurns(prev, question, set.ctx.history), buildChatContext(ref.current, new Date(), set.ctx), photos.filter((p) => p.base64).map((p) => ({ base64: p.base64, mime: p.mime })), ctl.signal);
       store.appendChatMsg(chatId, newMsg('ai', answer));
       play('ai');
     } catch (e: any) {
       ok = false;
-      store.appendChatMsg(chatId, newMsg('ai', e?.message || String(e), Date.now(), true));
+      // отмена — не ошибка: короткая пометка, вопрос возвращается в поле ввода
+      store.appendChatMsg(chatId, newMsg('ai', isCancelled(e) ? 'Запрос отменён.' : e?.message || String(e), Date.now(), true));
     } finally {
       sendingRef.current = false;
+      abortRef.current = null;
       setSending(false);
     }
     return ok;
   };
 
+  /** Отменить ожидание ответа ИИ. */
+  const cancel = () => abortRef.current?.abort();
   const open = (cid: string) => setShared(cid === dayId ? null : { id: cid, day: dayId });
   /** Новый пустой чат; сразу становится активным (до смены дня). */
   const create = () => { const nid = newChatId(); store.createChat(nid); setShared({ id: nid, day: dayId }); return nid; };
@@ -69,7 +76,7 @@ export function useChat() {
   const forget = (cid: string) => { if (shared?.id === cid) setShared(null); };
 
   return {
-    id, dayId, isToday: id === dayId, messages, sending, send, open, create, forget, settings: cs,
+    id, dayId, isToday: id === dayId, messages, sending, send, cancel, open, create, forget, settings: cs,
     title: chatName(chat, id, new Date(), cs.dayStartHour),
   };
 }

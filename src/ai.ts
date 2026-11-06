@@ -1,4 +1,4 @@
-import { AIResult, AISettings, FoodItem, Menu } from './types';
+import { AIEffort, AIResult, AISettings, FoodItem, Menu } from './types';
 import { kcalText, macroText } from './utils';
 import { mergeItems } from './logic';
 
@@ -26,6 +26,7 @@ const RULES = `Правила оценки:
 
 const SYSTEM_EAT = `Ты — опытный диетолог-нутрициолог. Пользователь ведёт дневник питания и сообщает, что он СЪЕЛ: текстом и/или фото (блюдо, продукт, тарелка, упаковка с этикеткой).
 Распознай каждое отдельное блюдо/продукт и оцени пищевую ценность ОДНОЙ ПОЛНОЙ ПОРЦИИ.
+ШТУЧНЫЕ ПРОДУКТЫ (главное правило количества): если съедено несколько одинаковых штук/кусков/порций («4 хлебца», «3 печенья», «2 яйца», «5 конфет», «два бутерброда») — верни ОДИН элемент на ОДНУ минимальную штуку: name — в единственном числе («Хлебец»), grams, kcal, БЖУ — только для одной штуки, а поле portion = количество штук (4). Приложение само умножит значения на portion. НИКОГДА не возвращай суммарные калории всех штук при portion=1. Если количество не штучное (суп, каша, напиток, «200 г гречки») — portion не указывай, считай всю порцию. Если в тексте разные штучные продукты («2 яйца и 3 хлебца») — это разные элементы, у каждого свой portion.
 ${RULES}
 - Поле section оставь пустым, title — пустым.
 - Если пользователь прислал целое меню с множеством позиций — верни все позиции и поставь isMenu=true.
@@ -39,6 +40,7 @@ ${RULES}
 const SYSTEM_MENU = `Ты — опытный диетолог-нутрициолог. Пользователь присылает своё МЕНЮ (на день, на неделю, из доставки или ресторана) текстом и/или фото. Его сохранят и потом будут отмечать съеденные блюда.
 Распознай ВСЕ позиции меню строго в исходном порядке (если блюда пронумерованы — сохрани их порядок по номерам; номер в название не включай). Для каждой оцени пищевую ценность ОДНОЙ ПОРЦИИ (если в меню указан выход/вес — используй его).
 ${RULES}
+- fact — для каждой позиции один короткий (до 110 символов) интересный и достоверный факт про один из её ингредиентов, по-русски, без цифр, в которых не уверен.
 - section — раздел меню, к которому относится блюдо, как в оригинале («Завтрак», «Обед», «Ужин», «Перекус», «Супы», «Первое», «Напитки»…); если разделов нет — пустая строка.
 - title — название всего меню. ТЩАТЕЛЬНО ищи на фото название меню и дату: в шапке, в углах, мелким шрифтом, на этикетках, рядом с логотипом. Отдельно внимательно проверь, есть ли на фото дата и/или день недели. Если на фото есть дата — title строго в формате «Сб (01.01.2026)»: краткий день недели (Пн, Вт, Ср, Чт, Пт, Сб, Вс), пробел и дата ДД.ММ.ГГГГ в скобках (день недели вычисли по дате, если он не написан). Если есть только день недели без даты — title равен краткому дню недели («Сб»). Если ни даты, ни дня недели нет — короткое название (до 30 символов), например «Доставка Grow Food, 1500 ккал».
 - group="separate", isMenu=true.`;
@@ -59,7 +61,7 @@ const menuContext = (menus: Menu[]) => {
 const presetContext = (list: FoodItem[]) => {
   if (!list.length) return '';
   const lines = list.slice(0, 60).map((i) => `- ${i.name} — ${kcalText(i)}, ${macroText(i)}${i.grams ? `, ${i.grams} г` : ''}`).join('\n');
-  return `\n\nСОХРАНЁННЫЕ БЛЮДА ПОЛЬЗОВАТЕЛЯ (пресеты с проверенными КБЖУ):\n${lines}\nЕсли пользователь называет одно из этих блюд — используй именно эти название и КБЖУ.`;
+  return `\n\nСОХРАНЁННЫЕ БЛЮДА ПОЛЬЗОВАТЕЛЯ (справочник, а НЕ список для подстановки):\n${lines}\nИспользуй сохранённое блюдо ТОЛЬКО если пользователь назвал именно его: название совпадает по смыслу и по составу («бутерброд с колбасой» ≠ «бутерброд с сыром», «борщ» ≠ «щи»). Похожее, но другое блюдо НЕ подставляй — оцени заново. Если всё же взял значения из сохранённого блюда — первой строкой explanation напиши «Взято из сохранённого блюда «<название>»: <ккал>, <Б/Ж/У>» и коротко скажи, почему это именно оно; иначе в explanation не упоминай сохранённые блюда.`;
 };
 
 const itemProps = {
@@ -74,6 +76,7 @@ const itemProps = {
   fiber: { type: 'number' },
   sugar: { type: 'number' },
   note: { type: 'string' },
+  fact: { type: 'string' },
   section: { type: 'string' },
   portion: { type: 'number' },
   time: { type: 'string' },
@@ -134,6 +137,7 @@ export function normalize(raw: any): Omit<AIResult, 'items'> & { items: AIItem[]
     fiber: num(i.fiber),
     sugar: num(i.sugar),
     note: i.note ? String(i.note).slice(0, 120) : undefined,
+    ...(i.fact && String(i.fact).trim() ? { fact: String(i.fact).trim().slice(0, 140) } : {}),
     section: i.section ? String(i.section).slice(0, 40) : undefined,
     portion: num(i.portion) > 0 && num(i.portion) <= 10 ? num(i.portion) : undefined,
     ...(explanation ? { explain: explanation } : {}),
@@ -184,46 +188,77 @@ export async function readError(res: Response) {
 
 /** Наш собственный тайм-аут: expo-fetch при abort() выдаёт «Fetch request has been canceled». */
 export class AITimeout extends Error {}
+/** Пользователь сам отменил запрос — не ошибка, не повторяется и не показывается. */
+export class AICancelled extends Error {
+  constructor() { super('Запрос отменён'); this.name = 'AICancelled'; }
+}
+export const isCancelled = (e: any) => e instanceof AICancelled || e?.name === 'AICancelled';
 const TIMEOUT_MS = 180000; // модели с «размышлением» + фото могут отвечать больше полутора минут
 
-function withTimeout(ms: number) {
+function withTimeout(ms: number, ext?: AbortSignal) {
   const c = new AbortController();
   let fired = false;
   const t = setTimeout(() => { fired = true; c.abort(); }, ms);
-  return { signal: c.signal, done: () => clearTimeout(t), fired: () => fired, ms };
+  const onExt = () => c.abort();
+  if (ext) { if (ext.aborted) c.abort(); else ext.addEventListener('abort', onExt); }
+  return {
+    signal: c.signal,
+    done: () => { clearTimeout(t); ext?.removeEventListener('abort', onExt); },
+    fired: () => fired,
+    cancelled: () => !!ext?.aborted,
+    ms,
+  };
 }
 const timeoutError = (t: { ms: number }) =>
   new AITimeout(`ИИ не ответил за ${Math.round(t.ms / 1000)} с. Запрос мог дойти, но ответ не успел вернуться — попробуйте ещё раз или снимите меню покороче.`);
 
+/** Бюджет «размышления» Claude по уровню усилия (off — без размышления). */
+export const claudeBudget = (e?: AIEffort): number => (e === 'low' ? 1024 : e === 'medium' ? 4096 : e === 'high' ? 10000 : 0);
+
+/** thinkingConfig Gemini по уровню усилия; undefined — поведение по умолчанию для модели. */
+export function geminiEffort(model: string, e?: AIEffort): Record<string, unknown> | undefined {
+  if (!e) return undefined;
+  const m = model.toLowerCase();
+  if (/gemini-3/.test(m)) return { thinkingLevel: e === 'off' ? 'low' : e };
+  if (/gemini-2\.5-pro/.test(m)) return { thinkingBudget: e === 'off' ? 128 : e === 'low' ? 1024 : e === 'medium' ? 4096 : 8192 };
+  if (/gemini-2\.5|flash-latest/.test(m)) return { thinkingBudget: e === 'off' ? 0 : e === 'low' ? 1024 : e === 'medium' ? 4096 : 8192 };
+  return undefined;
+}
+
 /** Ход разговора для структурированного запроса: фото — только у последнего вопроса. */
 interface STurn { role: 'user' | 'ai'; text: string }
 
-async function callClaudeJson(key: string, model: string, system: string, turns: STurn[], images: AIImage[], schema: any, toolName: string, ms = TIMEOUT_MS): Promise<any> {
-  const t = withTimeout(ms);
+async function callClaudeJson(key: string, model: string, system: string, turns: STurn[], images: AIImage[], schema: any, toolName: string, ms = TIMEOUT_MS, signal?: AbortSignal, effort?: AIEffort): Promise<any> {
+  const t = withTimeout(ms, signal);
+  const budget = claudeBudget(effort);
+  const post = (think: boolean) => fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    signal: t.signal,
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: think ? budget + 4096 : 4096,
+      system,
+      tools: [{ name: toolName, description: 'Вернуть результат в заданном формате', input_schema: schema }],
+      // с «размышлением» принудительный выбор инструмента не поддерживается — просим вызвать его через auto
+      tool_choice: think ? { type: 'auto' } : { type: 'tool', name: toolName },
+      ...(think ? { thinking: { type: 'enabled', budget_tokens: budget } } : {}),
+      messages: turns.map((m, i) => ({
+        role: m.role === 'ai' ? 'assistant' : 'user',
+        content: i === turns.length - 1
+          ? [...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.base64 } })), { type: 'text', text: m.text || 'Распознай еду на фото.' }]
+          : m.text,
+      })),
+    }),
+  });
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      signal: t.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system,
-        tools: [{ name: toolName, description: 'Вернуть результат в заданном формате', input_schema: schema }],
-        tool_choice: { type: 'tool', name: toolName },
-        messages: turns.map((m, i) => ({
-          role: m.role === 'ai' ? 'assistant' : 'user',
-          content: i === turns.length - 1
-            ? [...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.base64 } })), { type: 'text', text: m.text || 'Распознай еду на фото.' }]
-            : m.text,
-        })),
-      }),
-    });
+    let res = await post(budget > 0);
+    if (!res.ok && budget > 0 && res.status === 400) res = await post(false); // модель не умеет «размышлять» — без него
     if (!res.ok) throw await readError(res);
     const j = await res.json();
     const tool = (j.content || []).find((c: any) => c.type === 'tool_use');
@@ -231,6 +266,7 @@ async function callClaudeJson(key: string, model: string, system: string, turns:
     const txt = (j.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('');
     return extractJson(txt);
   } catch (e) {
+    if (t.cancelled()) throw new AICancelled();
     if (t.fired()) throw timeoutError(t);
     throw e;
   } finally {
@@ -238,8 +274,8 @@ async function callClaudeJson(key: string, model: string, system: string, turns:
   }
 }
 
-async function callGeminiJson(key: string, model: string, system: string, turns: STurn[], images: AIImage[], schema: any, ms = TIMEOUT_MS): Promise<any> {
-  const t = withTimeout(ms);
+async function callGeminiJson(key: string, model: string, system: string, turns: STurn[], images: AIImage[], schema: any, ms = TIMEOUT_MS, signal?: AbortSignal, effort?: AIEffort): Promise<any> {
+  const t = withTimeout(ms, signal);
   const send = (think: boolean) => fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
@@ -258,8 +294,8 @@ async function callGeminiJson(key: string, model: string, system: string, turns:
           temperature: 0.2,
           responseMimeType: 'application/json',
           responseSchema: toGemini(schema),
-          // умеренное «размышление»: для разбора таблицы меню хватает, а ответ приходит в разы быстрее
-          ...(think ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
+          // по умолчанию умеренное «размышление»; если задан уровень в настройках — он
+          ...(think ? { thinkingConfig: geminiEffort(model, effort) || { thinkingLevel: 'low' } } : {}),
         },
       }),
     },
@@ -279,6 +315,7 @@ async function callGeminiJson(key: string, model: string, system: string, turns:
     if (!txt) throw new Error(j.promptFeedback?.blockReason ? 'Запрос отклонён: ' + j.promptFeedback.blockReason : 'Пустой ответ от Gemini');
     return extractJson(txt);
   } catch (e) {
+    if (t.cancelled()) throw new AICancelled();
     if (t.fired()) throw timeoutError(t);
     throw e;
   } finally {
@@ -287,10 +324,10 @@ async function callGeminiJson(key: string, model: string, system: string, turns:
 }
 
 /** Структурированный запрос к выбранному провайдеру с повтором при обрыве связи. */
-async function structured(settings: AISettings, key: string, system: string, turns: STurn[], images: AIImage[], schema: any, toolName: string, attempts = 3): Promise<any> {
+async function structured(settings: AISettings, key: string, system: string, turns: STurn[], images: AIImage[], schema: any, toolName: string, attempts = 3, signal?: AbortSignal, effort?: AIEffort): Promise<any> {
   const run = () => settings.provider === 'claude'
-    ? callClaudeJson(key, settings.claudeModel || DEFAULT_MODELS.claude, system, turns, images, schema, toolName)
-    : callGeminiJson(key, settings.geminiModel || DEFAULT_MODELS.gemini, system, turns, images, schema);
+    ? callClaudeJson(key, settings.claudeModel || DEFAULT_MODELS.claude, system, turns, images, schema, toolName, TIMEOUT_MS, signal, effort)
+    : callGeminiJson(key, settings.geminiModel || DEFAULT_MODELS.gemini, system, turns, images, schema, TIMEOUT_MS, signal, effort);
   // Мобильная сеть рвёт длинные запросы с фото — пробуем до трёх раз.
   let last: any;
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -299,6 +336,7 @@ async function structured(settings: AISettings, key: string, system: string, tur
       return await run();
     } catch (e: any) {
       last = e;
+      if (isCancelled(e) || signal?.aborted) throw new AICancelled();
       // повторяем только быстрые обрывы связи; долгое ожидание/тайм-аут повторять бессмысленно
       if (e instanceof AITimeout || Date.now() - started > 20000 || !isNetworkHiccup(e) || attempt === attempts - 1) break;
       await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
@@ -312,13 +350,13 @@ export async function analyzeFood(
   key: string,
   text: string,
   images: AIImage[],
-  opts: { mode?: 'eat' | 'menu'; menus?: Menu[]; presets?: FoodItem[]; refDate?: string } = {},
+  opts: { mode?: 'eat' | 'menu'; menus?: Menu[]; presets?: FoodItem[]; refDate?: string; signal?: AbortSignal } = {},
 ): Promise<AIResult> {
   if (!key) throw new Error('Добавьте API-ключ в настройках');
   const system = opts.mode === 'menu'
     ? SYSTEM_MENU + (opts.refDate ? `\n- Меню загружают для дня ${opts.refDate} (ГГГГ-ММ-ДД): если на фото дата без года — год бери отсюда.` : '')
     : SYSTEM_EAT + menuContext(opts.menus || []) + presetContext(opts.presets || []);
-  const raw = await structured(settings, key, system, [{ role: 'user', text }], images, jsonSchema, 'report_food');
+  const raw = await structured(settings, key, system, [{ role: 'user', text }], images, jsonSchema, 'report_food', 3, opts.signal, opts.mode === 'menu' ? settings.effort?.menu ?? settings.effort?.eat : settings.effort?.eat);
   const res = normalize(raw);
   return opts.mode === 'menu' ? res : applyGrouping(res, text, images.length > 0);
 }
@@ -336,6 +374,7 @@ export const isOverloaded = (msg: string) => /high demand|overload|unavailable|t
 export const OVERLOADED_MSG = 'Сервис ИИ перегружен, попробуйте позже.';
 
 export function friendlyError(e: any, hadPhoto: boolean): Error {
+  if (isCancelled(e)) return e;
   if (isOverloaded(String(e?.message || ''))) return new Error(OVERLOADED_MSG);
   if (e instanceof AITimeout || !isNetworkHiccup(e)) return e instanceof Error ? e : new Error(String(e?.message || e));
   const tail = hadPhoto
@@ -399,16 +438,17 @@ const CHAT_TIMEOUT_MS = 90000;
 /** Вопрос по умолчанию, если фото отправлено без текста. */
 export const DEFAULT_PHOTO_QUESTION = 'Что на фото? Как это вписывается в мой день?';
 
-async function chatClaude(key: string, model: string, system: string, turns: ChatTurn[], images: AIImage[] = []): Promise<string> {
-  const t = withTimeout(CHAT_TIMEOUT_MS);
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+async function chatClaude(key: string, model: string, system: string, turns: ChatTurn[], images: AIImage[] = [], signal?: AbortSignal, effort?: AIEffort): Promise<string> {
+  const t = withTimeout(CHAT_TIMEOUT_MS + claudeBudget(effort) * 8, signal);
+  const budget = claudeBudget(effort);
+  const post = (think: boolean) => fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal: t.signal,
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
         model,
-        max_tokens: 1024,
+        max_tokens: think ? budget + 1024 : 1024,
+        ...(think ? { thinking: { type: 'enabled', budget_tokens: budget } } : {}),
         system,
         messages: turns.map((m, i) => ({
           role: m.role === 'ai' ? 'assistant' : 'user',
@@ -419,12 +459,16 @@ async function chatClaude(key: string, model: string, system: string, turns: Cha
         })),
       }),
     });
+  try {
+    let res = await post(budget > 0);
+    if (!res.ok && budget > 0 && res.status === 400) res = await post(false);
     if (!res.ok) throw await readError(res);
     const j = await res.json();
     const txt = stripReasoning((j.content || []).filter((c: any) => c.type !== 'thinking' && c.type !== 'redacted_thinking').map((c: any) => c.text || '').join('').trim());
     if (!txt) throw new Error('Пустой ответ от Claude');
     return txt;
   } catch (e) {
+    if (t.cancelled()) throw new AICancelled();
     if (t.fired()) throw timeoutError(t);
     throw e;
   } finally {
@@ -432,8 +476,8 @@ async function chatClaude(key: string, model: string, system: string, turns: Cha
   }
 }
 
-async function chatGemini(key: string, model: string, system: string, turns: ChatTurn[], images: AIImage[] = []): Promise<string> {
-  const t = withTimeout(CHAT_TIMEOUT_MS);
+async function chatGemini(key: string, model: string, system: string, turns: ChatTurn[], images: AIImage[] = [], signal?: AbortSignal, effort?: AIEffort): Promise<string> {
+  const t = withTimeout(CHAT_TIMEOUT_MS, signal);
   const send = (think: boolean) => fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
@@ -448,7 +492,7 @@ async function chatGemini(key: string, model: string, system: string, turns: Cha
             ? [...images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.base64 } })), { text: m.text }]
             : [{ text: m.text }],
         })),
-        generationConfig: { temperature: 0.5, ...(think && geminiThinking(model) ? { thinkingConfig: geminiThinking(model) } : {}) },
+        generationConfig: { temperature: 0.5, ...(think && (geminiEffort(model, effort) || geminiThinking(model)) ? { thinkingConfig: geminiEffort(model, effort) || geminiThinking(model) } : {}) },
       }),
     },
   );
@@ -466,6 +510,7 @@ async function chatGemini(key: string, model: string, system: string, turns: Cha
     if (!txt) throw new Error(j.promptFeedback?.blockReason ? 'Запрос отклонён: ' + j.promptFeedback.blockReason : 'Пустой ответ от Gemini');
     return txt;
   } catch (e) {
+    if (t.cancelled()) throw new AICancelled();
     if (t.fired()) throw timeoutError(t);
     throw e;
   } finally {
@@ -474,14 +519,14 @@ async function chatGemini(key: string, model: string, system: string, turns: Cha
 }
 
 /** Ответ ИИ в чате. `history` — последние сообщения (последним должен быть вопрос пользователя), `context` — текст из buildChatContext. */
-export async function chatWithAI(settings: AISettings, key: string, history: ChatTurn[], context: string, images: AIImage[] = []): Promise<string> {
+export async function chatWithAI(settings: AISettings, key: string, history: ChatTurn[], context: string, images: AIImage[] = [], signal?: AbortSignal): Promise<string> {
   if (!key) throw new Error('Добавьте API-ключ в настройках');
   const turns = toChatTurns(history);
   if (!turns.length) throw new Error('Напишите вопрос');
   const system = `${CHAT_SYSTEM}\n\nДАННЫЕ ПОЛЬЗОВАТЕЛЯ (актуальны на момент вопроса):\n${context}`;
   const run = () => settings.provider === 'claude'
-    ? chatClaude(key, settings.claudeModel || DEFAULT_MODELS.claude, system, turns, images)
-    : chatGemini(key, settings.geminiModel || DEFAULT_MODELS.gemini, system, turns, images);
+    ? chatClaude(key, settings.claudeModel || DEFAULT_MODELS.claude, system, turns, images, signal, settings.effort?.chat)
+    : chatGemini(key, settings.geminiModel || DEFAULT_MODELS.gemini, system, turns, images, signal, settings.effort?.chat);
   let last: any;
   for (let attempt = 0; attempt < 2; attempt++) {
     const started = Date.now();
@@ -489,6 +534,7 @@ export async function chatWithAI(settings: AISettings, key: string, history: Cha
       return await run();
     } catch (e: any) {
       last = e;
+      if (isCancelled(e) || signal?.aborted) throw new AICancelled();
       if (e instanceof AITimeout || Date.now() - started > 15000 || !isNetworkHiccup(e) || attempt === 1) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -546,7 +592,7 @@ ${RULES}
 - Если это просто вопрос («почему так много калорий?», «сколько тут белка?») — ответь в reply, changed=false, items — пустой список.
 - reply — короткий ответ по-русски (1–5 строк), что изменилось или ответ на вопрос. Без рассуждений вслух.
 - explanation — как посчитаны итоговые значения (если changed=true) — подробно, 3–10 строк; иначе пустая строка.
-- Поле portion оставляй пустым, section — как было у блюда.`;
+- Поле portion оставляй пустым, section — как было у блюда. Значения — на одну полную порцию блюда как оно записано (количество штук приложение хранит отдельно).`;
 
 export const dishSchema = {
   type: 'object',
@@ -581,17 +627,17 @@ const dishJson = (items: FoodItem[]) => JSON.stringify(items.map(({ explain, ...
  * Разговор о блюде: `turns` — история этого мини-разговора (последним — сообщение пользователя),
  * `dishes` — текущие блюда. В «Чаты» не сохраняется.
  */
-export async function dishTalk(settings: AISettings, key: string, dishes: FoodItem[], turns: ChatTurn[], images: AIImage[] = []): Promise<DishTalkResult> {
+export async function dishTalk(settings: AISettings, key: string, dishes: FoodItem[], turns: ChatTurn[], images: AIImage[] = [], signal?: AbortSignal): Promise<DishTalkResult> {
   if (!key) throw new Error('Добавьте API-ключ в настройках');
   const t = toChatTurns(turns);
   if (!t.length) throw new Error('Напишите уточнение');
   const system = `${DISH_SYSTEM}\n\nТЕКУЩИЕ БЛЮДА:\n${dishes.length ? dishJson(dishes) : '[] (блюд пока нет — если пользователь описывает еду, верни её как новые блюда, changed=true)'}`;
-  const raw = await structured(settings, key, system, t, images, dishSchema, 'update_dish', 2);
+  const raw = await structured(settings, key, system, t, images, dishSchema, 'update_dish', 2, signal, settings.effort?.refine);
   return normalizeDishTalk(raw, dishes);
 }
 
 /** «Скорректировать с ИИ»: одна просьба к одному блюду → исправленное блюдо (или исходное, если ИИ ничего не менял). */
-export async function refineDish(settings: AISettings, key: string, item: FoodItem, instruction: string): Promise<{ item: FoodItem; reply: string; changed: boolean }> {
-  const r = await dishTalk(settings, key, [item], [{ role: 'user', text: instruction }]);
-  return { item: r.items?.[0] ? { ...r.items[0], section: item.section } : item, reply: r.reply, changed: !!r.items?.[0] };
+export async function refineDish(settings: AISettings, key: string, item: FoodItem, instruction: string, signal?: AbortSignal): Promise<{ item: FoodItem; reply: string; changed: boolean; explanation?: string }> {
+  const r = await dishTalk(settings, key, [item], [{ role: 'user', text: instruction }], [], signal);
+  return { item: r.items?.[0] ? { ...r.items[0], section: item.section } : item, reply: r.reply, changed: !!r.items?.[0], explanation: r.explanation };
 }

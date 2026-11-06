@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/RNText';
 import { play } from '../sound';
-import { C, T } from '../theme';
+import { C, T, TABS, shade } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Btn, Chip, Field, NumField, Sheet, Unk } from '../ui/kit';
 import { AmountPicker } from '../ui/Amount';
@@ -10,7 +10,8 @@ import { useStore } from '../store';
 import { analyzeFood } from '../ai';
 import { getKey, persistPhoto } from '../storage';
 import { fromCamera, fromGallery, Picked } from '../media';
-import { FoodItem, Menu } from '../types';
+import { Entry, FoodItem, Menu } from '../types';
+import { DayTitle } from '../ui/DayTitle';
 import { dishState, eatenByName, fmt, humanDate, isClosed, kcalOf, kcalText, known, macroText, menuTitleFor, plural, r0, restItems, sum, uid } from '../utils';
 import { useToast } from '../ui/Toast';
 import { menuTitleFromAI } from '../logic';
@@ -20,9 +21,17 @@ import { DishesView, DishPicker } from './Dishes';
 import { DishIcon } from '../ui/DishIcon';
 import { IconPicker } from './IconPicker';
 import { DishAssist, ExplainButton } from './DishAssist';
+const X = TABS.menu;
+const XD = shade(X.accent, 0.72);
 
 /** Вкладка «Меню»: сохранённые меню, добавление блюда в дневник одним тапом. */
-export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish }: {
+export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish, onUpdateEntry, onRemoveEntry, onRequestDone }: {
+  /** обновить в дневнике запись, добавленную из меню */
+  onUpdateEntry: (id: string, item: FoodItem, portion: number) => void;
+  /** убрать с дневника запись, добавленную из меню */
+  onRemoveEntry: (e: Entry) => void;
+  /** запрос из дневника обработан — забыть его (иначе он срабатывает при каждом возврате во вкладку) */
+  onRequestDone?: () => void;
   date: string;
   /** отступ снизу для плавающей панели инструментов */
   bottom: number;
@@ -53,7 +62,18 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
   const [amount, setAmount] = useState(1);
   // блюдо, уточнённое с ИИ («съел только мясо») — добавляется в дневник вместо исходного; меню не меняется
   const [refined, setRefined] = useState<FoodItem | null>(null);
-  useEffect(() => { if (portionFor) { setAmount(1); setRefined(null); } }, [portionFor?.index, portionFor?.item.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // последняя запись этого блюда в дневнике выбранного дня (её можно обновить или убрать прямо отсюда)
+  const menuNow = menus.find((m) => m.id === sel);
+  const lastEntry = useMemo(() => {
+    if (!portionFor || !menuNow) return undefined;
+    return store.data.entries.filter((e) => e.date === date && e.menuId === menuNow.id && e.item.name === portionFor.item.name).sort((a, b) => a.time - b.time).pop();
+  }, [store.data.entries, portionFor, menuNow, date]);
+  useEffect(() => {
+    if (!portionFor) return;
+    // открыли блюдо, уже внесённое в дневник, — показываем то, что записано (порцию и уточнённую версию)
+    setAmount(lastEntry ? lastEntry.portion : 1);
+    setRefined(lastEntry && menuNow && JSON.stringify([lastEntry.item.kcal, lastEntry.item.protein, lastEntry.item.fat, lastEntry.item.carbs, lastEntry.item.note]) !== JSON.stringify([portionFor.item.kcal, portionFor.item.protein, portionFor.item.fat, portionFor.item.carbs, portionFor.item.note]) ? lastEntry.item : null);
+  }, [portionFor?.index, portionFor?.item.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // название остаётся как в меню (по нему считается «съедено»), что изменил ИИ — в заметке
   const asEaten = (orig: FoodItem, r: FoodItem | null): FoodItem => (!r ? orig : { ...r, name: orig.name, section: orig.section, note: r.name.trim() !== orig.name.trim() ? `${r.name}${r.note ? ' — ' + r.note : ''}` : r.note });
 
@@ -66,6 +86,7 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
     if (request.kind === 'attach') setPickOld(true);
     else if (request.kind === 'upload') setCreate(true);
     else setEdit(blankMenu(date));
+    onRequestDone?.();
   }, [request?.n]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const menu = menus.find((m) => m.id === sel);
@@ -99,10 +120,7 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
       {/* шапка */}
       <View style={[st.head, { paddingTop: topInset + 6 }]}>
         <Pressable onPress={() => go(-1)} hitSlop={8} style={{ padding: 6 }}><Icon name="left" size={24} color={C.inkSoft} /></Pressable>
-        <Pressable onPress={openCalendar} style={{ flex: 1, alignItems: 'center' }} hitSlop={6}>
-          <Text style={T.small}>Меню на</Text>
-          <Text style={T.h2} numberOfLines={1}>{humanDate(date)}</Text>
-        </Pressable>
+        <DayTitle date={date} onPress={openCalendar} tab="menu" caption="Меню на" />
         <Pressable accessibilityLabel="Следующий день" onPress={() => go(1)} disabled={!canNext} hitSlop={8} style={{ padding: 6, opacity: canNext ? 1 : 0.3 }}><Icon name="right" size={24} color={canNext ? C.inkSoft : C.line} /></Pressable>
       </View>
 
@@ -125,7 +143,7 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
             );
           })}
           <Pressable accessibilityLabel="Добавить меню из прошлых" onPress={() => setPickOld(true)} style={({ pressed }) => [st.pill, st.pillPlus, pressed && { opacity: 0.7 }]}>
-            <Icon name="plus" size={20} color={C.accent} stroke={2.2} />
+            <Icon name="plus" size={20} color={X.accent} stroke={2.2} />
           </Pressable>
         </GHScrollView>
         </View>
@@ -180,7 +198,7 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
                     <Pressable key={i} onLongPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} delayLongPress={300}
                       onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} style={({ pressed }) => [st.dish, closed && { opacity: 0.55 }, pressed && { opacity: 0.7 }]}>
                       <View style={{ alignItems: 'center', marginRight: 12, alignSelf: 'flex-start', gap: 6 }}>
-                        <View style={[st.num, { marginRight: 0 }, n || closed ? { backgroundColor: C.accent, borderColor: C.accent } : null]}>
+                        <View style={[st.num, { marginRight: 0 }, n || closed ? { backgroundColor: X.accent, borderColor: X.accent } : null]}>
                           <Text style={[st.numT, n || closed ? { color: C.white } : null]}>{menu.items.indexOf(it) + 1}</Text>
                         </View>
                         <DishIcon name={it.name} emoji={it.emoji} en={it.en} where="menu" onLongPress={() => setIconFor(it)} />
@@ -196,16 +214,16 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
                         {it.note ? <Text style={[T.small, { color: C.inkSoft, marginTop: 2 }]} numberOfLines={2}>{it.note}</Text> : null}
                         {ds.kind !== 'none' ? (
                           <View style={[st.eaten, ds.kind === 'part' && st.rest, ds.kind === 'closed' && st.closedTag]}>
-                            <Icon name="check" size={13} color={ds.kind === 'part' ? C.fat : ds.kind === 'closed' ? C.muted : C.accent} stroke={2.6} />
-                            <Text style={{ color: ds.kind === 'part' ? '#8A6A1F' : ds.kind === 'closed' ? C.muted : C.accent, fontSize: 12.5, fontWeight: '700' }}>
+                            <Icon name="check" size={13} color={ds.kind === 'part' ? C.fat : ds.kind === 'closed' ? C.muted : X.accent} stroke={2.6} />
+                            <Text style={{ color: ds.kind === 'part' ? '#8A6A1F' : ds.kind === 'closed' ? C.muted : X.accent, fontSize: 12.5, fontWeight: '700' }}>
                               {ds.label}
                             </Text>
                           </View>
                         ) : null}
                       </View>
-                      <Pressable onPress={() => add(it, 1)} onLongPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} hitSlop={6}
-                        style={({ pressed }) => [st.plus, n || closed ? { backgroundColor: C.accentSoft } : null, pressed && { transform: [{ scale: 0.92 }] }]}>
-                        <Icon name="plus" size={24} color={n || closed ? C.accent : C.white} stroke={2.4} />
+                      <Pressable accessibilityLabel={`Добавить: ${it.name}`} onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} hitSlop={6}
+                        style={({ pressed }) => [st.plus, n || closed ? { backgroundColor: X.soft } : null, pressed && { transform: [{ scale: 0.92 }] }]}>
+                        <Icon name="plus" size={24} color={n || closed ? X.accent : C.white} stroke={2.4} />
                       </Pressable>
                     </Pressable>
                   );
@@ -218,7 +236,7 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
                 <Btn label={rest.length === menu.items.length && !menu.closed?.length ? `Съел всё меню · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал` : `Отметить остальное (${rest.length}) · ${fmt(rest.reduce((a, b) => a + kcalOf(b), 0))} ккал`}
                   kind="soft" icon="check" onPress={() => onAddAll(rest, menu)} style={{ marginTop: 18 }} />
               ) : (
-                <Text style={[T.body, { textAlign: 'center', marginTop: 18, color: C.accent, fontWeight: '600' }]}>Всё меню отмечено ✓</Text>
+                <Text style={[T.body, { textAlign: 'center', marginTop: 18, color: X.accent, fontWeight: '600' }]}>Всё меню отмечено ✓</Text>
               );
             })()}
             <Text style={[T.small, { textAlign: 'center', marginTop: 12 }]}>«+» — целая порция · нажмите на блюдо — порция или граммы</Text>
@@ -231,8 +249,14 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
         <Sheet visible onClose={() => setPortionFor(null)} title={portionFor.item.name}
           footer={
             <View style={{ gap: 8, paddingBottom: 4 }}>
-              <Btn label={`${refined ? 'Добавить уточнённое' : 'Добавить'} · ${kcalText(refined || portionFor.item, amount)}`} onPress={() => { add(asEaten(portionFor.item, refined), amount); setPortionFor(null); }}
+              <Btn label={`${lastEntry ? 'Добавить ещё' : refined ? 'Добавить в дневник уточнённое' : 'Добавить в дневник'} · ${kcalText(refined || portionFor.item, amount)}`} onPress={() => { add(asEaten(portionFor.item, refined), amount); setPortionFor(null); }}
                 style={{ paddingVertical: 16 }} disabled={amount <= 0} />
+              {lastEntry ? (
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <ActBtn label="Обновить в дневнике" icon="check" onPress={() => { onUpdateEntry(lastEntry.id, asEaten(portionFor.item, refined), amount); setPortionFor(null); }} style={{ minHeight: 50 }} />
+                  <ActBtn label="Удалить с дневника" icon="trash" danger onPress={() => { onRemoveEntry(lastEntry); setPortionFor(null); }} style={{ minHeight: 50 }} />
+                </View>
+              ) : null}
               <ActBtn label={isClosed(menu, portionFor.item.name) ? 'Снять закрытие блюда' : 'Закрыть блюдо'} icon="check" style={{ flex: 0, minHeight: 50 }}
                 onPress={() => {
                   const name = portionFor.item.name; const was = isClosed(menu, name);
@@ -256,13 +280,13 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
               </View>
             </View>
           }>
-          {(() => { const ds = dishState(eaten[portionFor.item.name] || 0, isClosed(menu, portionFor.item.name)); return ds.kind !== 'none' ? <Text style={[T.small, { marginBottom: 6, color: C.accent, fontWeight: '700' }]}>{ds.label}</Text> : null; })()}
+          {(() => { const ds = dishState(eaten[portionFor.item.name] || 0, isClosed(menu, portionFor.item.name)); return ds.kind !== 'none' ? <Text style={[T.small, { marginBottom: 6, color: X.accent, fontWeight: '700' }]}>{ds.label}</Text> : null; })()}
           <Text style={[T.small, { marginBottom: 12 }]}>
             Полная порция: {kcalText(portionFor.item)}{portionFor.item.grams ? ` · ${r0(portionFor.item.grams)} г` : ''} · {macroText(portionFor.item)}
           </Text>
           {refined ? (
             <View style={st.refined}>
-              <Text style={[T.label, { color: C.accent }]}>Уточнено с ИИ</Text>
+              <Text style={[T.label, { color: X.accent }]}>Уточнено с ИИ</Text>
               <Text style={[T.h3, { marginTop: 2 }]}>{refined.name}</Text>
               <Text style={[T.small, { marginTop: 2 }]}>{kcalText(refined)}{refined.grams ? ` · ${r0(refined.grams)} г` : ''} · {macroText(refined)}</Text>
               {refined.note ? <Text style={[T.small, { color: C.inkSoft, marginTop: 2 }]}>{refined.note}</Text> : null}
@@ -272,13 +296,13 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
           <AmountPicker big value={amount} onChange={setAmount} gramsPerPortion={(refined || portionFor.item).grams} kcalPerPortion={(refined || portionFor.item).kcal}
             onGramsKnown={(g) => { const it = { ...portionFor.item, grams: g }; store.replaceMenuItem(menu.id, portionFor.index, it); setPortionFor({ ...portionFor, item: it }); }} />
           <View style={{ marginTop: 12 }}><ExplainButton items={[refined || portionFor.item]} /></View>
-          <DishAssist items={[refined || portionFor.item]} onItems={(its) => setRefined(its[0])} placeholder="Уточнить для ИИ: «съел только мясо», «без гарнира»…" />
+          <DishAssist items={[refined || portionFor.item]} onItems={(its, orig) => setRefined(orig ? null : its[0])} placeholder="Уточнить для ИИ: «съел только мясо», «без гарнира»…" />
         </Sheet>
       ) : null}
 
       {iconFor ? <IconPicker item={iconFor} onClose={() => setIconFor(null)} /> : null}
       {replace && menu ? (
-        <DishPicker visible title="Заменить на…" onClose={() => setReplace(null)}
+        <DishPicker visible title="Заменить на…" date={date} onClose={() => setReplace(null)}
           onManual={() => { setEditIndex(replace.index); setEdit(menu); setReplace(null); }}
           onPick={(item) => { store.replaceMenuItem(menu.id, replace.index, item); setReplace(null); play('preset'); }} />
       ) : null}
@@ -373,11 +397,11 @@ function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }:
       <Text style={[T.bodySoft, { marginBottom: 14 }]}>Или сфотографируйте меню / вставьте текст — ИИ разберёт сам. Несколько фото — несколько отдельных меню (по одному на фото).</Text>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Pressable onPress={() => pick('camera')} style={st.bigPick}>
-          <Icon name="camera" size={28} color={C.accent} />
+          <Icon name="camera" size={28} color={X.accent} />
           <Text style={st.bigPickT}>Камера</Text>
         </Pressable>
         <Pressable onPress={() => pick('gallery')} style={st.bigPick}>
-          <Icon name="image" size={28} color={C.accent} />
+          <Icon name="image" size={28} color={X.accent} />
           <Text style={st.bigPickT}>Галерея</Text>
         </Pressable>
       </View>
@@ -393,7 +417,7 @@ function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }:
       ) : null}
       <TextInput value={text} onChangeText={setText} multiline placeholder={'Например:\nЗавтрак — сырники со сметаной, кофе\nОбед — борщ, котлета с пюре…'}
         placeholderTextColor={C.muted} style={[T.body, st.textArea]} />
-      {busy ? <ActivityIndicator color={C.accent} style={{ marginTop: 10 }} /> : null}
+      {busy ? <ActivityIndicator color={X.accent} style={{ marginTop: 10 }} /> : null}
     </Sheet>
   );
 }
@@ -468,7 +492,7 @@ function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }:
                   <Text style={[T.body, { fontWeight: '500' }]} numberOfLines={2}>{it.name || 'Новое блюдо'}</Text>
                   <Text style={T.small}>{kcalText(it)} · {macroText(it)}</Text>
                 </View>
-                <Icon name={expanded ? 'check' : 'edit'} size={20} color={expanded ? C.accent : C.muted} />
+                <Icon name={expanded ? 'check' : 'edit'} size={20} color={expanded ? X.accent : C.muted} />
               </Pressable>
 
               {expanded ? (
@@ -507,8 +531,8 @@ function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }:
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {SECTIONS.map((s) => (
           <Pressable key={s} onPress={() => setOpen(insert(s))} style={({ pressed }) => [st.secBtn, pressed && { opacity: 0.7 }]}>
-            <Icon name="plus" size={16} color={C.accent} stroke={2.2} />
-            <Text style={{ color: C.accent, fontWeight: '600', fontSize: 14 }}>{s}</Text>
+            <Icon name="plus" size={16} color={X.accent} stroke={2.2} />
+            <Text style={{ color: X.accent, fontWeight: '600', fontSize: 14 }}>{s}</Text>
           </Pressable>
         ))}
       </View>
@@ -527,31 +551,31 @@ function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }:
 
 const st = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingBottom: 8 },
-  newBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.accent, paddingHorizontal: 16, height: 44, borderRadius: 22 },
+  newBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: X.accent, paddingHorizontal: 16, height: 44, borderRadius: 22 },
   empty: { backgroundColor: C.surface, borderRadius: 16, padding: 24, marginTop: 20, alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   paper: { backgroundColor: C.surface, marginHorizontal: 12, marginTop: 14, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   secHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
   secLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: C.lineStrong },
-  secTitle: { fontFamily: 'Lora_400Regular_Italic', fontSize: 15, color: C.accent, letterSpacing: 0.3 },
+  secTitle: { fontFamily: 'Lora_400Regular_Italic', fontSize: 15, color: X.accent, letterSpacing: 0.3 },
   pill: { flexDirection: 'row', alignItems: 'center', height: 38, paddingHorizontal: 14, borderRadius: 19, backgroundColor: C.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, maxWidth: 260 },
-  pillOn: { backgroundColor: C.accent, borderColor: C.accent },
-  refined: { padding: 12, borderRadius: 12, backgroundColor: C.accentTint, borderWidth: 1, borderColor: C.accent, marginBottom: 12 },
-  pillPlus: { width: 46, paddingHorizontal: 0, justifyContent: 'center', backgroundColor: C.accentTint, borderStyle: 'dashed', borderColor: C.accent },
-  num: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: C.accent, alignItems: 'center', justifyContent: 'center', marginRight: 12, alignSelf: 'flex-start', marginTop: 2 },
-  numT: { fontFamily: 'Lora_600SemiBold', fontSize: 16, color: C.accent },
+  pillOn: { backgroundColor: X.accent, borderColor: X.accent },
+  refined: { padding: 12, borderRadius: 12, backgroundColor: X.tint, borderWidth: 1, borderColor: X.accent, marginBottom: 12 },
+  pillPlus: { width: 46, paddingHorizontal: 0, justifyContent: 'center', backgroundColor: X.tint, borderStyle: 'dashed', borderColor: X.accent },
+  num: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: X.accent, alignItems: 'center', justifyContent: 'center', marginRight: 12, alignSelf: 'flex-start', marginTop: 2 },
+  numT: { fontFamily: 'Lora_600SemiBold', fontSize: 16, color: X.accent },
   dish: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   dots: { flex: 1, minWidth: 12, marginHorizontal: 6, borderBottomWidth: 1, borderStyle: 'dotted', borderColor: C.lineStrong, marginBottom: 4 },
-  plus: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+  plus: { width: 48, height: 48, borderRadius: 24, backgroundColor: X.accent, alignItems: 'center', justifyContent: 'center' },
   rest: { backgroundColor: '#F7EFD9' },
   closedTag: { backgroundColor: C.line },
-  eaten: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 6, backgroundColor: C.accentSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  eaten: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 6, backgroundColor: X.soft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   pBig: { width: '31%', flexGrow: 1, height: 76, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong },
   bigPick: { flex: 1, height: 84, borderRadius: 14, backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  bigPickT: { color: C.accent, fontWeight: '600', fontSize: 14 },
+  bigPickT: { color: X.accent, fontWeight: '600', fontSize: 14 },
   x: { position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center' },
   textArea: { marginTop: 14, minHeight: 110, maxHeight: 220, textAlignVertical: 'top', backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, borderRadius: 10, padding: 12 },
   act: { flex: 1, height: 64, borderRadius: 12, backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong, alignItems: 'center', justifyContent: 'center', gap: 4 },
-  actT: { color: C.accent, fontWeight: '600', fontSize: 13 },
+  actT: { color: X.accent, fontWeight: '600', fontSize: 13 },
   yBanner: { marginHorizontal: 12, marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: '#F3EEDF' },
   oldCard: { backgroundColor: C.surface, borderRadius: 12, marginBottom: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   old: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10, minHeight: 60 },
@@ -560,9 +584,9 @@ const st = StyleSheet.create({
     shadowColor: '#0F2A1C', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
   mainBtn: { flex: 1, flexDirection: 'row', gap: 8, height: 52 },
-  tool: { height: 54, paddingHorizontal: 4, borderRadius: 18, backgroundColor: C.accentTint, alignItems: 'center', justifyContent: 'center' },
-  take: { backgroundColor: C.accentSoft, paddingHorizontal: 14, height: 40, borderRadius: 20, justifyContent: 'center' },
-  secBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 46, paddingHorizontal: 14, borderRadius: 23, backgroundColor: C.accentTint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  tool: { height: 54, paddingHorizontal: 4, borderRadius: 18, backgroundColor: X.tint, alignItems: 'center', justifyContent: 'center' },
+  take: { backgroundColor: X.soft, paddingHorizontal: 14, height: 40, borderRadius: 20, justifyContent: 'center' },
+  secBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 46, paddingHorizontal: 14, borderRadius: 23, backgroundColor: X.tint, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   editRow: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
 });
 
@@ -633,17 +657,17 @@ function MenuToolbar({ bottom, hidden, menu, onUpload, onManual, onPast, onEdit,
   const run = (fn: () => void) => () => { setOpen(null); fn(); };
   const Tool = ({ icon, label, on, flex = 1 }: { icon: any; label: string; on: () => void; flex?: number }) => (
     <Pressable onPress={on} accessibilityLabel={label} style={({ pressed }) => [st.tool, { flex }, pressed && { opacity: 0.6 }]}>
-      <Icon name={icon} size={21} color={C.accent} />
-      <Text style={{ fontSize: 11.5, fontWeight: '600', marginTop: 2, color: C.accent, textAlign: 'center' }} numberOfLines={2}>{label}</Text>
+      <Icon name={icon} size={21} color={X.accent} />
+      <Text style={{ fontSize: 11.5, fontWeight: '600', marginTop: 2, color: X.accent, textAlign: 'center' }} numberOfLines={2}>{label}</Text>
     </Pressable>
   );
   const Main = ({ k, icon, label }: { k: 'add' | 'edit'; icon: any; label: string }) => {
     const on = open === k;
     return (
       <Pressable onPress={() => setOpen(on ? null : k)} accessibilityLabel={label}
-        style={({ pressed }) => [st.tool, st.mainBtn, on && { backgroundColor: C.accent }, pressed && { opacity: 0.7 }]}>
-        <Icon name={icon} size={21} color={on ? C.white : C.accent} stroke={on ? 2.2 : 1.7} />
-        <Text style={{ fontSize: 15, fontWeight: '700', color: on ? C.white : C.accent }}>{label}</Text>
+        style={({ pressed }) => [st.tool, st.mainBtn, on && { backgroundColor: X.accent }, pressed && { opacity: 0.7 }]}>
+        <Icon name={icon} size={21} color={on ? C.white : X.accent} stroke={on ? 2.2 : 1.7} />
+        <Text style={{ fontSize: 14, fontWeight: '700', color: on ? C.white : X.accent, flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{label}</Text>
       </Pressable>
     );
   };
@@ -670,8 +694,8 @@ function MenuToolbar({ bottom, hidden, menu, onUpload, onManual, onPast, onEdit,
             </Animated.View>
           ) : null}
           <View style={{ flexDirection: 'row', gap: 6 }}>
-            <Main k="add" icon="plus" label="Добавить" />
-            {menu ? <Main k="edit" icon="edit" label="Изменить" /> : null}
+            <Main k="add" icon="plus" label="Добавить меню" />
+            {menu ? <Main k="edit" icon="edit" label="Изменить меню" /> : null}
           </View>
         </View>
       </View>

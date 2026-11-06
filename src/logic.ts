@@ -1,7 +1,7 @@
 import { AISettings, AppData, Entry, FoodItem, IconRef, IconSettings, MealDef, Menu, TargetRecord, WeightPoint } from './types';
 import { chatSettings } from './chat';
 import { normalizeIconSettings } from './iconify';
-import { addDays, DEFAULT_MEALS, fromKey, mealAtMinutes, minutesOf, pad, timestampAt, toKey, todayKey, uid } from './utils';
+import { addDays, decimalOn, DEFAULT_MEALS, numLabel, fromKey, mealAtMinutes, minutesOf, pad, timestampAt, toKey, todayKey, uid } from './utils';
 
 /** Чистые функции над данными приложения: store.tsx только вызывает их (так их можно тестировать без React). */
 
@@ -233,16 +233,29 @@ export const daySwipeAllowed = (o: { animating: boolean; chatOpen: boolean; dx: 
 
 /** Метка шкалы: значение, подпись, крупная ли (0…2 — крупные с широким шагом), позиция в px от начала шкалы. */
 export interface PortionMark { v: number; label: string; big: boolean; x: number }
-const FRAC: [number, string][] = [[0, '0'], [0.25, '¼'], [1 / 3, '⅓'], [0.5, '½'], [2 / 3, '⅔'], [0.75, '¾'], [1, '1'], [1.25, '1¼'], [1.5, '1½'], [2, '2']];
-/** Подпись доли: «¼», «1½», «2½», «7»… */
+const FRAC: [number, string][] = [[0, '0'], [0.25, '¼'], [1 / 3, '⅓'], [0.5, '½'], [2 / 3, '⅔'], [0.75, '¾'], [1, '1'], [1.25, '1¼'], [1.5, '1½'], [1.75, '1¾'], [2, '2']];
+/** Подпись доли: «¼», «1½», «2½», «7»… В режиме «десятичные» — 0.5, 1.25, 7 (без «7.00»). */
 export const fracLabel = (v: number): string => {
+  if (decimalOn()) return numLabel(v);
   const f = FRAC.find(([x]) => Math.abs(x - v) < 0.01);
   if (f) return f[1];
   const whole = Math.floor(v + 1e-6);
   const rest = v - whole;
   if (Math.abs(rest) < 0.01) return String(whole);
   if (Math.abs(rest - 0.5) < 0.01) return `${whole}½`;
-  return String(Math.round(v * 100) / 100).replace('.', ',');
+  if (Math.abs(rest - 0.25) < 0.01) return `${whole}¼`;
+  if (Math.abs(rest - 0.75) < 0.01) return `${whole}¾`;
+  // восьмые: 1/8, 3/8, 5/8, 7/8 — для мелкого шага
+  for (const e of [1, 3, 5, 7]) if (Math.abs(rest - e / 8) < 0.01) return `${whole ? whole + ' ' : ''}${e}/8`;
+  return numLabel(v);
+};
+/** Мелкий шаг доли: в режиме дробей — 1/8, в десятичном — 0.1. Результат не отрицательный и без «хвостов» вроде 0.30000000004. */
+export const stepPortion = (v: number, dir: 1 | -1): number => {
+  if (decimalOn()) return Math.max(0, Math.round((v + dir * 0.1) * 10) / 10);
+  const e = v * 8;
+  const onGrid = Math.abs(e - Math.round(e)) < 0.02; // на трети (⅓, ⅔) сетки восьмых нет — идём к ближайшей восьмой в нужную сторону
+  const next = onGrid ? Math.round(e) + dir : dir === 1 ? Math.ceil(e) : Math.floor(e);
+  return Math.max(0, next / 8);
 };
 /** Шкала 0…10: до 2 — все дроби с шагом `bigGap`, дальше — каждые ½ с шагом `smallGap`. */
 export const portionMarks = (bigGap = 60, smallGap = 34): PortionMark[] => {
@@ -251,9 +264,42 @@ export const portionMarks = (bigGap = 60, smallGap = 34): PortionMark[] => {
   for (let v = 2.5; v <= 10.0001; v += 0.5) { x += smallGap; out.push({ v, label: fracLabel(v), big: false, x }); }
   return out;
 };
+const GLYPH: Record<string, [string, string]> = { '¼': ['1', '4'], '½': ['1', '2'], '¾': ['3', '4'], '⅓': ['1', '3'], '⅔': ['2', '3'], '⅛': ['1', '8'], '⅜': ['3', '8'], '⅝': ['5', '8'], '⅞': ['7', '8'] };
+
+/** Разбор подписи вроде «1½», «⅔», «3/8», «1 3/8» → целая часть и дробь (или null, если это обычное число). */
+export function parseFrac(label: string): { whole: string; num: string; den: string } | null {
+  const m = label.match(/^(\d+)?\s*([¼½¾⅓⅔⅛⅜⅝⅞])$/);
+  if (m) return { whole: m[1] || '', num: GLYPH[m[2]][0], den: GLYPH[m[2]][1] };
+  const k = label.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/);
+  if (k) return { whole: k[1] || '', num: k[2], den: k[3] };
+  return null;
+}
+
 /** Ближайшая метка к позиции прокрутки. */
 export const markAtOffset = (marks: PortionMark[], x: number): PortionMark =>
   marks.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a), marks[0]);
+/** Положение на шкале для любого значения (между метками — линейно): колесо плавно показывает и мелкие шаги. */
+export const xForValue = (marks: PortionMark[], v: number): number => {
+  if (v <= marks[0].v) return marks[0].x;
+  for (let i = 1; i < marks.length; i++) {
+    if (v <= marks[i].v + 1e-9) {
+      const a = marks[i - 1], b = marks[i];
+      return a.x + ((v - a.v) / (b.v - a.v)) * (b.x - a.x);
+    }
+  }
+  return marks[marks.length - 1].x;
+};
+/** Обратно: значение под позицией прокрутки (линейно между метками). */
+export const valueForX = (marks: PortionMark[], x: number): number => {
+  if (x <= marks[0].x) return marks[0].v;
+  for (let i = 1; i < marks.length; i++) {
+    if (x <= marks[i].x) {
+      const a = marks[i - 1], b = marks[i];
+      return a.v + ((x - a.x) / (b.x - a.x)) * (b.v - a.v);
+    }
+  }
+  return marks[marks.length - 1].v;
+};
 /** Ближайшая метка к значению (для начальной позиции). */
 export const markForValue = (marks: PortionMark[], v: number): PortionMark =>
   marks.reduce((a, b) => (Math.abs(b.v - v) < Math.abs(a.v - v) ? b : a), marks[0]);

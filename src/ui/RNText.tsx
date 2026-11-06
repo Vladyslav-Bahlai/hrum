@@ -13,8 +13,12 @@ export const Text = React.forwardRef<React.ComponentRef<typeof RNText>, TextProp
 ));
 Text.displayName = 'Text';
 
+/** Подписка на фокус любого поля ввода: окна (Sheet) по нему прокручивают поле над клавиатурой. */
+export const focusBus = new Set<() => void>();
+
 export const TextInput = React.forwardRef<React.ComponentRef<typeof RNTextInput>, TextInputProps>((p, ref) => (
-  <RNTextInput maxFontSizeMultiplier={MAX_FONT_SCALE} {...p} ref={ref} />
+  <RNTextInput maxFontSizeMultiplier={MAX_FONT_SCALE} {...p} ref={ref}
+    onFocus={(e) => { p.onFocus?.(e); focusBus.forEach((f) => f()); }} />
 ));
 TextInput.displayName = 'TextInput';
 export type { TextProps, TextInputProps };

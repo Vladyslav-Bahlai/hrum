@@ -2,24 +2,22 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
-import { AdSlide, fmt, known } from '../utils';
+import { AdSlide } from '../utils';
+import { factFor } from '../facts';
 import { AD_MS, deckStep, newDeck } from '../logic';
 import { DishIcon } from '../ui/DishIcon';
 
 export { AD_MS };
 const FADE_MS = 400;
 
-function Row({ sl, multi }: { sl: AdSlide; multi: boolean }) {
+function Row({ sl }: { sl: AdSlide; multi: boolean }) {
   const it = sl.item;
-  const k = known(it);
   return (
     <>
-      <DishIcon name={it.name} emoji={it.emoji} en={it.en} size={36} where="carousel" />
+      <DishIcon name={it.name} emoji={it.emoji} en={it.en} size={44} where="carousel" />
       <View style={{ flex: 1 }}>
-        <Text style={[T.body, { fontWeight: '700', color: C.accentDark }]} numberOfLines={1}>{it.name}</Text>
-        <Text style={T.small} numberOfLines={1}>
-          {k.kcal ? `${fmt(it.kcal!)} ккал` : 'ккал не указаны'}{multi ? ` · ${sl.menuTitle}` : it.section ? ` · ${it.section}` : ''}
-        </Text>
+        <Text style={[T.h3, { fontSize: 17.5, lineHeight: 22, color: C.ink }]} numberOfLines={1}>{it.name}</Text>
+        <Text style={{ fontSize: 14, lineHeight: 19, color: C.inkSoft, marginTop: 2 }} numberOfLines={2}>{factFor(it)}</Text>
       </View>
     </>
   );
@@ -73,7 +71,7 @@ export function MenuAd({ slides, multi }: { slides: AdSlide[]; multi: boolean })
 }
 
 const s = StyleSheet.create({
-  box: { height: 46, marginTop: 8, overflow: 'hidden' },
+  box: { height: 62, overflow: 'hidden' },
   row: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
   emoji: { fontSize: 30, lineHeight: 36, width: 38, textAlign: 'center' },
 });

@@ -25,7 +25,9 @@ export interface Draft {
 const blank = (): FoodItem => ({ name: '' });
 
 /** Проверка результата ИИ / ручной ввод / редактирование записи. */
-export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: minutes0, comment, photo, mode, onSave, onDelete, isFav, onFav }: {
+export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: minutes0, comment, photo, mode, onSave, onDelete, isFav, onFav, date }: {
+  /** день записи — для разбивки списка «Заменить на…» (меню этого дня / другие меню) */
+  date?: string;
   visible: boolean;
   onClose: () => void;
   initial: Draft[];
@@ -122,7 +124,7 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: m
     <Sheet visible={visible} onClose={onClose} title={title} scrollEnabled={!drag}
       footer={
         <View style={{ gap: 10 }}>
-          <Btn label={chosen.length ? `${mode === 'edit' ? 'Сохранить' : 'Добавить'} · ${fmt(total)} ккал${unkCount ? ' +?' : ''}` : 'Ничего не выбрано'}
+          <Btn label={chosen.length ? `${mode === 'edit' ? 'Обновить в дневнике' : 'Добавить в дневник'} · ${fmt(total)} ккал${unkCount ? ' +?' : ''}` : 'Ничего не выбрано'}
             disabled={!chosen.length || minutes === null} onPress={() => onSave(chosen, meal, minutes ?? minutes0)} style={{ paddingVertical: 16 }} />
           {onDelete ? <ActBtn label="Удалить запись" icon="trash" danger onPress={onDelete} style={{ flex: 0 }} /> : null}
         </View>
@@ -179,6 +181,13 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: m
                 {[d.meal ? getMeals().find((m) => m.key === d.meal)?.label : '', d.minutes !== undefined ? minutesLabel(d.minutes) : ''].filter(Boolean).join(' · ')} — отдельная запись
               </Text>
             ) : null}
+            {onFav && d.item.name ? (
+              <Pressable accessibilityLabel={isFav?.(d.item) ? 'Убрать из избранного' : 'Сохранить в избранное'} onPress={() => onFav(d.item)} hitSlop={6}
+                style={({ pressed }) => [st.favTop, isFav?.(d.item) && st.favTopOn, pressed && { opacity: 0.75 }]}>
+                <Icon name={isFav?.(d.item) ? 'starFill' : 'star'} size={26} color={isFav?.(d.item) ? C.fat : C.inkSoft} stroke={2} />
+                <Text style={{ fontSize: 14, fontWeight: '700', color: isFav?.(d.item) ? '#8A6A1F' : C.inkSoft }}>{isFav?.(d.item) ? 'В избранном' : 'В избранное'}</Text>
+              </Pressable>
+            ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
               {many ? (
                 <Pressable onPress={() => set(i, { on: !d.on })} hitSlop={10} style={[st.check, d.on && st.checkOn]}>
@@ -230,9 +239,6 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: m
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
               <ActBtn label={expanded ? 'Готово' : 'Изменить'} icon={expanded ? 'check' : 'edit'} onPress={() => setOpen(expanded ? null : i)} />
               <ActBtn label="Заменить" icon="repeat" onPress={() => setPicker(i)} />
-              {onFav && d.item.name ? (
-                <ActBtn label="" icon={isFav?.(d.item) ? 'starFill' : 'star'} on={isFav?.(d.item)} onPress={() => onFav(d.item)} style={{ flex: 0, flexGrow: 0, flexShrink: 0, width: 56, paddingHorizontal: 0 }} />
-              ) : null}
             </View>
             {d.parts ? <ActBtn label="Разделить обратно" icon="repeat" onPress={() => split(i)} style={{ flex: 0, marginTop: 8 }} /> : null}
           </Animated.View>
@@ -254,7 +260,7 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: m
       ) : null}
       <Hair style={{ opacity: 0 }} />
       {picker !== null ? (
-        <DishPicker visible title="Заменить на…" onClose={() => setPicker(null)}
+        <DishPicker visible title="Заменить на…" date={date} onClose={() => setPicker(null)}
           onPick={(item) => { set(picker, { item: { ...item }, on: true }); setPicker(null); }} />
       ) : null}
     </Sheet>
@@ -288,6 +294,8 @@ function InlineKcal({ value, onChange }: { value: number | undefined; onChange: 
 
 const st = StyleSheet.create({
   inlineKcal: { padding: 0, margin: 0, textAlign: 'right', width: 92, fontFamily: T.h2.fontFamily, borderWidth: 0, backgroundColor: 'transparent' },
+  favTop: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-end', height: 44, paddingHorizontal: 14, borderRadius: 22, marginBottom: 8, backgroundColor: C.paper, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  favTopOn: { backgroundColor: '#F8EFD5', borderColor: '#E6CF8E' },
   itemTarget: { borderColor: C.accent, borderWidth: 2, backgroundColor: C.accentTint },
   itemDrag: { shadowColor: '#0F2A1C', shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 12, zIndex: 10 },
   undo: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, paddingLeft: 14, borderRadius: 12, backgroundColor: C.accentSoft, marginBottom: 10 },

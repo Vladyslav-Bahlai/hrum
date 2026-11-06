@@ -51,12 +51,14 @@ export function AmountPicker({ value, onChange, gramsPerPortion, kcalPerPortion,
         <View style={{ marginTop: 10 }}>
           <View style={st.gRow}>
             <Pressable onPress={() => setGrams((parseFloat(gText) || 0) - 10)} style={[st.step, { height: h }]}><Text style={st.stepT}>−10</Text></Pressable>
+            <Pressable onPress={() => setGrams((parseFloat(gText) || 0) - 1)} style={[st.step, st.stepSm, { height: h }]}><Text style={st.stepT}>−1</Text></Pressable>
             <View style={[st.gInput, { height: h }]}>
               <TextInput value={gText} keyboardType="number-pad" selectTextOnFocus={Platform.OS === 'ios'}
                 onChangeText={(t) => { setGText(t); const n = parseFloat(t.replace(',', '.')); if (isFinite(n)) onChange(n / g0); }}
-                style={[T.h2, { textAlign: 'center', minWidth: 60, fontVariant: ['tabular-nums'] }]} />
+                style={[T.h2, { textAlign: 'center', minWidth: 48, fontVariant: ['tabular-nums'] }]} />
               <Text style={[T.bodySoft, { marginLeft: 4 }]}>г</Text>
             </View>
+            <Pressable onPress={() => setGrams((parseFloat(gText) || 0) + 1)} style={[st.step, st.stepSm, { height: h }]}><Text style={st.stepT}>+1</Text></Pressable>
             <Pressable onPress={() => setGrams((parseFloat(gText) || 0) + 10)} style={[st.step, { height: h }]}><Text style={st.stepT}>+10</Text></Pressable>
           </View>
           <View style={[st.grid, { marginTop: 8 }]}>
@@ -91,8 +93,9 @@ const st = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   cell: { flexBasis: '30%', flexGrow: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface, borderWidth: 1, borderColor: C.lineStrong },
   on: { backgroundColor: C.accent, borderColor: C.accent },
-  gRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  step: { width: 72, borderRadius: 12, backgroundColor: C.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  gRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  stepSm: { width: 48 },
+  step: { width: 60, borderRadius: 12, backgroundColor: C.accentSoft, alignItems: 'center', justifyContent: 'center' },
   stepT: { fontSize: 17, fontWeight: '700', color: C.accent },
   gInput: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.lineStrong },
 });

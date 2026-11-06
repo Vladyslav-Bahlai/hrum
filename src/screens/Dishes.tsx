@@ -45,21 +45,57 @@ function LibRow({ l, onPress, right }: { l: LibItem; onPress?: () => void; right
   );
 }
 
-/** Выбор блюда из «Моих блюд» и истории — для замены блюда в меню или записи. */
-export function DishPicker({ visible, title = 'Выбрать блюдо', onClose, onPick, onManual }: {
-  visible: boolean; title?: string; onClose: () => void; onPick: (item: FoodItem) => void; onManual?: () => void;
+/** Разбивка блюд для замены: избранное, меню выбранного дня, другие меню (и история — на поиск). Блюдо попадает только в первую подходящую группу. */
+export function pickerGroups(data: import('../types').AppData, date: string, q: string): { key: string; title: string; items: LibItem[] }[] {
+  const lib = buildLibrary(data);
+  const byKey = new Map(lib.map((l) => [l.key, l]));
+  const seen = new Set<string>();
+  const k = (n: string) => n.trim().toLowerCase();
+  const take = (names: FoodItem[]): LibItem[] => {
+    const out: LibItem[] = [];
+    for (const it of names) {
+      const key = k(it.name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(byKey.get(key) || { key, item: { ...it, section: undefined, portion: undefined }, count: 0, last: 0 });
+    }
+    return searchLibrary(out, q);
+  };
+  const fav = take(data.favorites.map((f) => f.item));
+  const today = take(data.menus.filter((m) => m.dates.includes(date)).flatMap((m) => m.items));
+  const other = take(data.menus.filter((m) => !m.dates.includes(date)).flatMap((m) => m.items));
+  const rest = searchLibrary(lib.filter((l) => !seen.has(l.key)), q).slice(0, q ? 60 : 20);
+  return [
+    { key: 'fav', title: 'Избранное', items: fav },
+    { key: 'today', title: 'Из меню на этот день', items: today },
+    { key: 'other', title: 'Из других меню', items: other },
+    { key: 'hist', title: 'Из истории', items: rest },
+  ].filter((g) => g.items.length);
+}
+
+/** Выбор блюда из «Моих блюд» и истории — для замены блюда в меню или записи. Если передан `date` — список разбит на группы. */
+export function DishPicker({ visible, title = 'Выбрать блюдо', onClose, onPick, onManual, date }: {
+  visible: boolean; title?: string; onClose: () => void; onPick: (item: FoodItem) => void; onManual?: () => void; date?: string;
 }) {
   const { data } = useStore();
   const [q, setQ] = useState('');
   const lib = useMemo(() => buildLibrary(data), [data]);
   const list = searchLibrary(lib, q).slice(0, 80);
+  const groups = useMemo(() => (date ? pickerGroups(data, date, q) : []), [data, date, q]);
   return (
     <Sheet visible={visible} onClose={onClose} title={title}>
       <SearchBox value={q} onChange={setQ} />
       {onManual ? (
         <ActBtn label="Ввести вручную" icon="edit" onPress={onManual} style={{ flex: 0, marginVertical: 10 }} />
       ) : <View style={{ height: 8 }} />}
-      {list.length ? list.map((l) => <LibRow key={l.key} l={l} onPress={() => { onPick(l.item); }} />) : (
+      {date ? (
+        groups.length ? groups.map((g) => (
+          <View key={g.key} style={{ marginBottom: 6 }}>
+            <Text style={[T.label, { marginTop: 8, marginBottom: 2 }]}>{g.title} · {g.items.length}</Text>
+            {g.items.map((l) => <LibRow key={g.key + l.key} l={l} onPress={() => { onPick(l.item); }} />)}
+          </View>
+        )) : <Text style={[T.small, { paddingVertical: 20, textAlign: 'center' }]}>{q ? 'Ничего не найдено' : 'Библиотека пока пуста'}</Text>
+      ) : list.length ? list.map((l) => <LibRow key={l.key} l={l} onPress={() => { onPick(l.item); }} />) : (
         <Text style={[T.small, { paddingVertical: 20, textAlign: 'center' }]}>{q ? 'Ничего не найдено' : 'Библиотека пока пуста'}</Text>
       )}
     </Sheet>

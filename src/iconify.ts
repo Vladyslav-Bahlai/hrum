@@ -247,6 +247,37 @@ export const toggleSource = (st: IconSettings, id: string): IconSettings => {
   const sources = st.sources.map((s) => (s.id === id ? { ...s, on: !s.on } : s));
   return sources.some((s) => s.on) ? { ...st, sources } : st;
 };
+/** Куда встанет перетаскиваемая строка: heights — высоты строк, gap — отступ между ними, dy — сдвиг пальца. */
+export const dropIndex = (heights: number[], from: number, dy: number, gap = 0): number => {
+  let top = 0;
+  for (let i = 0; i < from; i++) top += heights[i] + gap;
+  const c = top + (heights[from] || 0) / 2 + dy;
+  let acc = 0;
+  for (let i = 0; i < heights.length; i++) {
+    const end = acc + heights[i];
+    if (c < end + gap / 2) return i;
+    acc = end + gap;
+  }
+  return Math.max(0, heights.length - 1);
+};
+export const moveSourceTo = (st: IconSettings, from: number, to: number): IconSettings => {
+  if (from === to || from < 0 || to < 0 || from >= st.sources.length || to >= st.sources.length) return st;
+  const a = [...st.sources];
+  const [x] = a.splice(from, 1);
+  a.splice(to, 0, x);
+  return { ...st, sources: a };
+};
+/** Какие наборы Iconify не нужны в «Онлайн-поиске»: скачанные и стоящие в списке выше источника Iconify. */
+export const hiddenOnlineSets = (st: IconSettings, downloaded?: Record<string, unknown>): Set<string> => {
+  const out = new Set<string>();
+  const oi = st.sources.findIndex((s) => s.id === 'online');
+  st.sources.forEach((s, i) => {
+    if (!s.id.startsWith('pack:')) return;
+    const pre = s.id.slice(5);
+    if (downloaded?.[pre] || (oi >= 0 && i < oi)) out.add(pre);
+  });
+  return out;
+};
 export const moveSource = (st: IconSettings, id: string, d: -1 | 1): IconSettings => {
   const i = st.sources.findIndex((s) => s.id === id);
   const j = i + d;
