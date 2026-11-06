@@ -10,12 +10,11 @@ import { ActBtn, Btn, Empty, Field, IconBtn, Sheet, useKeyboardHeight } from '..
 import { useToast } from '../ui/Toast';
 import { Chat } from '../types';
 import { AttachSheet, PlusBtn } from './AttachSheet';
-import { ModelChip, ModelSheet } from './Composer';
+import { ModelSelect } from './ModelPopup';
 import { AskHint, emptyChatHint, Messages, useAskHint } from './ChatSlot';
 import { askHintVisible } from '../chat';
 import { useChat } from './useChat';
 const X = TABS.chats;
-const XD = shade(X.accent, 0.72);
 
 const when = (t: number) => {
   const d = new Date(t);
@@ -79,7 +78,6 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
   const canSend = (text.trim().length > 0 || photos.length > 0) && !chat.sending;
   const hintOn = view === 'chat' && askHintVisible({ text, focus, photos: photos.length });
   const hint = useAskHint(hintOn);
-  const [modelOpen, setModelOpen] = useState(false);
 
   const hits: ChatHit[] = searchChats(chats, q, now, sh);
   const activeChat = chats.find((c) => c.id === chat.id);
@@ -138,7 +136,7 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
             <IconBtn name="more" label="Действия" size={24} onPress={() => { Keyboard.dismiss(); setActions(chat.id); }} />
           </View>
           <Messages chat={chat} empty={emptyChatHint} />
-          <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 }}><ModelChip onPress={() => { Keyboard.dismiss(); setModelOpen(true); }} /></View>
+          <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 }}><ModelSelect /></View>
           {photos.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingBottom: 8 }} style={{ flexGrow: 0 }}>
               {photos.map((p, i) => (
@@ -160,14 +158,13 @@ export function ChatsScreen({ navSpace }: { navSpace: number }) {
               />
               {hintOn ? <AskHint hint={hint} left={12} top={11} /> : null}
             </View>
-            <Pressable accessibilityLabel="Отправить" onPress={send} style={[s.send, { backgroundColor: canSend ? X.accent : C.line }]}>
-              {chat.sending ? <ActivityIndicator color={C.white} /> : <Icon name="send" size={24} color={canSend ? C.white : C.muted} stroke={2.2} />}
+            <Pressable accessibilityLabel={chat.sending ? 'Отменить запрос' : 'Отправить'} onPress={chat.sending ? chat.cancel : send} style={[s.send, { backgroundColor: canSend || chat.sending ? X.accent : C.line }]}>
+              {chat.sending ? <><ActivityIndicator color={C.white} style={{ position: 'absolute' }} /><View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: C.white }} /></> : <Icon name="send" size={24} color={canSend ? C.white : C.muted} stroke={2.2} />}
             </Pressable>
           </View>
         </>
       )}
 
-      <ModelSheet visible={modelOpen} onClose={() => setModelOpen(false)} />
       <AttachSheet visible={attachOpen} onClose={() => setAttachOpen(false)} tiles={[
         { key: 'camera', label: 'Камера', icon: 'camera', onPress: () => { void add('camera'); } },
         { key: 'gallery', label: 'Галерея', icon: 'image', onPress: () => { void add('gallery'); } },
@@ -209,7 +206,7 @@ const s = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, borderRadius: 14, paddingHorizontal: 14, backgroundColor: C.surface, minHeight: 48 },
   item: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong, marginTop: 10 },
   badge: { backgroundColor: X.soft, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
-  badgeTxt: { fontSize: 11, fontWeight: '700', color: XD },
+  badgeTxt: { fontSize: 11, fontWeight: '700', color: shade(X.accent, 0.72) },
   bar: { flexDirection: 'row', alignItems: 'flex-end', marginHorizontal: 12, marginBottom: 8, padding: 6, gap: 6, backgroundColor: C.surface, borderRadius: 26, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   input: { minHeight: 44, maxHeight: 120, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 11 },
   thumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: C.line },

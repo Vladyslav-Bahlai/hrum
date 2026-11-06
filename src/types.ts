@@ -156,6 +156,8 @@ export interface AppData {
   iconPacks?: Record<string, { bytes: number; at: number }>;
   /** дроби в количестве порции показывать десятичными (0.5 вместо ½) */
   decimals?: boolean;
+  /** Час, в который начинается новый день дневника (0–11, по умолчанию 4). */
+  dayStart?: number;
   /** кэш онлайн-поиска: ключ блюда → «prefix:name» ('' — не найдено) */
   iconCache?: Record<string, string>;
 }

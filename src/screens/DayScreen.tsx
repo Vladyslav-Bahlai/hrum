@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, Easing, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Alert, Animated, Dimensions, Easing, Keyboard, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { DEMO } from '../demo';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Text } from '../ui/RNText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { play } from '../sound';
-import { C, shade, T, TABS } from '../theme';
+import { C, dayPaper, T, TABS } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Bar, Btn, IconBtn, Sheet, Unk, useKeyboardHeight } from '../ui/kit';
 import { closeOpenRow, SwipeRow } from '../ui/SwipeRow';
@@ -13,11 +13,11 @@ import { useToast } from '../ui/Toast';
 import { useStore } from '../store';
 import { analyzeFood, isCancelled } from '../ai';
 import { DayTitle } from '../ui/DayTitle';
-import { getKey, persistPhoto } from '../storage';
+import { getKey } from '../storage';
 import { Picked } from '../media';
 import { Entry, FoodItem, MealType } from '../types';
 import { mealAtMinutes, parseTime } from '../utils';
-import { addDays, amountLabel, carouselSlides, fmt, humanDate, kcalText, known, macroText, mealByTime, mealFromSection, getMeals, menuLeftCount, minutesOf, OTHER_MEAL, plural, r0, scaled, sum, timestampAt, todayKey } from '../utils';
+import { addDays, amountLabel, carouselSlides, fmt, humanDate, kcalText, known, macroText, mealByTime, mealFromSection, getMeals, menuLeftCount, minutesOf, OTHER_MEAL, plural, r0, scaled, sum, logicalAt, todayKey } from '../utils';
 import { canGo, clampDay, entryTimestamp, favoriteBubbles } from '../logic';
 import { MenuAd } from './MenuAd';
 import { DishIcon } from '../ui/DishIcon';
@@ -141,8 +141,7 @@ export function DayScreen() {
   const timeFor = () => {
     const now = new Date();
     if (date === todayKey()) return now.getTime();
-    const [y, m, d] = date.split('-').map(Number);
-    return new Date(y, m - 1, d, now.getHours(), now.getMinutes()).getTime();
+    return logicalAt(date, minutesOf(now.getTime()));
   };
   const defaultMeal = (): MealType => mealByTime();
 
@@ -280,12 +279,12 @@ export function DayScreen() {
       const time = entryTimestamp(e.time, e.date, minutes);
       store.updateEntry(e.id, { item: d.item, portion: d.portion, meal, time });
     } else {
-      const photo = review.photo ? persistPhoto(review.photo) : undefined;
+      const photo = undefined; // фото блюд не сохраняем и не показываем
       const now = timeFor();
       const base = entryTimestamp(now, date, minutes);
       store.addEntries(drafts.map((d, i) => ({
         date,
-        time: d.minutes !== undefined ? timestampAt(date, d.minutes) + i : base + i,
+        time: d.minutes !== undefined ? logicalAt(date, d.minutes) + i : base + i,
         meal: d.meal || (d.minutes !== undefined && data.autoMeal !== false ? mealAtMinutes(d.minutes) : meal),
         item: d.item, portion: d.portion, source: review.source, photo, menuId: menuIdFor(d.item.name),
       })));
@@ -299,11 +298,13 @@ export function DayScreen() {
   const isToday = date === todayKey();
   const tone = TABS[tab];
   // сегодняшний день светлее, вчера/завтра — чуть темнее: дни различимы с первого взгляда
-  const paper = tab === 'day' || tab === 'menu' ? (isToday ? tone.paper : shade(tone.paper)) : tone.paper;
+  const paper = tab === 'day' || tab === 'menu' ? dayPaper(tone.paper, isToday) : tone.paper;
+  const dim = (tab === 'day' || tab === 'menu') && !isToday;
 
   return (
     <ToneCtx.Provider value={tone}>
     <View style={{ flex: 1, backgroundColor: paper }}>
+      {!dim && (tab === 'day' || tab === 'menu') ? <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 4, backgroundColor: tone.accent, zIndex: 5 }} /> : null}
       {tab === 'fill' ? (
         <View style={{ flex: 1, paddingBottom: kbH }}><FillScreen topInset={ins.top} /></View>
       ) : tab === 'stats' || tab === 'settings' ? (
@@ -318,7 +319,7 @@ export function DayScreen() {
       ) : tab === 'menu' ? (
         <GestureDetector gesture={swipe}>
           <Animated.View collapsable={false} style={pageStyle}>
-            <MenuScreen date={date} go={go} canNext={date < today} openCalendar={() => setCalOpen(true)} topInset={ins.top} bottom={kbH ? kbH : navBottom + 70} request={menuReq} onAdd={addFromMenu} onAddAll={addAllFromMenu} onAddDish={quickAdd} onUpdateEntry={updateFromMenu} onRemoveEntry={removeFromMenu} onRequestDone={() => setMenuReq(undefined)} />
+            <View style={{ flex: 1, opacity: dim ? 0.78 : 1 }}><MenuScreen date={date} go={go} canNext={date < today} openCalendar={() => setCalOpen(true)} topInset={ins.top} bottom={kbH ? kbH : navBottom + 70} request={menuReq} onAdd={addFromMenu} onAddAll={addAllFromMenu} onAddDish={quickAdd} onUpdateEntry={updateFromMenu} onRemoveEntry={removeFromMenu} onRequestDone={() => setMenuReq(undefined)} /></View>
           </Animated.View>
         </GestureDetector>
       ) : (
@@ -332,7 +333,7 @@ export function DayScreen() {
 
       <GestureDetector gesture={swipe}>
       <Animated.View collapsable={false} style={pageStyle}>
-        <ScrollView contentContainerStyle={{ paddingBottom: 210 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScrollBeginDrag={closeOpenRow} onTouchStart={closeOpenRow}>
+        <ScrollView style={{ opacity: dim ? 0.78 : 1 }} contentContainerStyle={{ paddingBottom: 210 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScrollBeginDrag={closeOpenRow} onTouchStart={closeOpenRow}>
           {/* «витрина» меню дня: название блюда и короткий факт; тап — переход во вкладку «Меню» */}
           <Pressable testID="menu-ad" onPress={chooseFromMenu} accessibilityLabel="Меню на этот день" style={({ pressed }) => [st.ad, !dayMenus.length && st.adEmpty, pressed && { opacity: 0.8 }]}>
             {slides.length ? (
@@ -512,7 +513,7 @@ function EntryRow({ e, onPress, onLongPress, delayLongPress, rowOpen, onCloseRow
   const d = new Date(e.time);
   return (
     <Pressable onPress={rowOpen ? onCloseRow : onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} style={({ pressed }) => [st.row, pressed && { backgroundColor: C.accentTint }]}>
-      {e.photo ? <Image source={{ uri: e.photo }} style={st.ph} /> : <View style={{ marginRight: 12 }}><DishIcon name={e.item.name} emoji={e.item.emoji} en={e.item.en} where="diary" onLongPress={onIcon} /></View>}
+      <View style={{ marginRight: 12 }}><DishIcon name={e.item.name} emoji={e.item.emoji} en={e.item.en} where="diary" onLongPress={onIcon} /></View>
       <View style={{ flex: 1 }}>
         <Text style={[T.body, { fontWeight: '500' }]} numberOfLines={2}>{e.item.name}</Text>
         <Text style={[T.small, { marginTop: 2 }]}>

@@ -16,7 +16,6 @@ import { buildChatContext, chatSettings, CTX_PRESETS, estimateTokens, KEEP_OPTIO
 import { ChatContextOpts } from '../types';
 import { dropPlayer, EVENTS, preview, SOUND_NAMES, VOLUMES, setSoundVolume } from '../sound';
 const X = TABS.settings;
-const XD = shade(X.accent, 0.72);
 
 export function AISection() {
   const { data, update } = useStore();
@@ -361,8 +360,12 @@ function MealsSection() {
   return (
     <View style={{ gap: 12 }}>
       <Text style={T.small}>Категории дневника и часы, когда они действуют. По времени приложение само предлагает нужную категорию для нового блюда. Блюда удалённой категории переедут в ближайшую по времени.</Text>
-      <ToggleRow label="Десятичные числа вместо дробей" hint="1,5 вместо 1½ в порциях и количествах" on={!!data.decimals} onChange={(v) => update((d) => ({ ...d, decimals: v || undefined }))} />
+      <Text style={[T.label, { marginTop: 14, marginBottom: 6 }]}>Числа в колесе порций</Text>
+      <Seg items={[{ key: 'frac', label: 'Дроби  ¼ ½ ¾' }, { key: 'dec', label: 'Десятичные  0.5' }]} value={data.decimals ? 'dec' : 'frac'}
+        onChange={(v) => update((d) => ({ ...d, decimals: v === 'dec' ? true : undefined }))} />
+      <Text style={[T.small, { marginTop: 4, marginBottom: 6 }]}>Выбранный вид используется везде: на колесе, в шагах ± и в подписях порций — без смешивания.</Text>
       <ToggleRow label="Подбирать приём пищи по времени" hint="при смене времени записи категория меняется сама" on={data.autoMeal !== false} onChange={(v) => update((d) => ({ ...d, autoMeal: v ? undefined : false }))} />
+      <Stepper label="День начинается в" hint="записи до этого часа относятся к вчерашнему дню и идут в его конце" value={data.dayStart ?? 4} min={0} max={11} onChange={(n) => update((d) => ({ ...d, dayStart: n }))} fmtV={(n) => `${String(n).padStart(2, '0')}:00`} />
       {meals.map((m, i) => (
         <View key={m.key} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 12, gap: 8 }}>
           <Field label="Название" value={m.label} onChangeText={(t) => upd(i, { label: t })} />
@@ -432,7 +435,7 @@ export function SettingsScreen() {
         );
       })}
       <Hair />
-      <Text style={[T.small, { marginTop: 14 }]}>Хрум · версия 1.5</Text>
+      <Text style={[T.small, { marginTop: 14 }]}>Хрум · версия 1.6</Text>
     </ScrollView>
   );
 }

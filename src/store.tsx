@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppData, Chat, ChatMsg, ChatSettings, Entry, FoodItem, IconRef, IconSettings, MealDef, Menu, Profile, TargetRecord, Targets, WeightPoint } from './types';
-import { calcTargets, DEFAULT_MEALS, setDecimalMode, setMealsConfig } from './utils';
+import { calcTargets, DEFAULT_MEALS, setDayStart, setDecimalMode, setMealsConfig } from './utils';
 import * as L from './logic';
 import * as CH from './chat';
 import { deletePhoto, loadData, resolveSoundUri, saveData } from './storage';
@@ -93,6 +93,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { setSoundVolume(data.soundVolume); }, [data.soundVolume]);
   useEffect(() => { setMealsConfig(data.meals); }, [data.meals]);
   useEffect(() => { setDecimalMode(data.decimals); }, [data.decimals]);
+  useEffect(() => { setDayStart(data.dayStart); }, [data.dayStart]);
   useEffect(() => { setSoundResolver(resolveSoundUri); }, []);
   useEffect(() => {
     loadData().then((d) => {

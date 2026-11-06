@@ -1,17 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, LayoutAnimation, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, LayoutAnimation, Pressable, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/RNText';
 import { play } from '../sound';
 import { C, T } from '../theme';
 import { Icon } from '../ui/Icon';
 import { ActBtn, Btn, Field, NumField, Sheet } from '../ui/kit';
 import { useStore } from '../store';
-import { mergeItems } from '../logic';
-import { DishAssist, ExplainButton } from './DishAssist';
+import { ExplainButton, RefineHistory, RefineInput, useRefine } from './DishAssist';
 import { buildLibrary, LibItem, searchLibrary } from '../library';
-import { analyzeFood } from '../ai';
-import { getKey } from '../storage';
-import { fromCamera, fromGallery } from '../media';
 import { FoodItem } from '../types';
 import { isCollapsed } from '../logic';
 import { kcalText, macroText, r0 } from '../utils';
@@ -109,33 +105,9 @@ export function PresetEditor({ visible, initial, presetId, onClose }: {
   const store = useStore();
   const blank: FoodItem = { name: '' };
   const [it, setIt] = useState<FoodItem>(initial || blank);
-  const [ask, setAsk] = useState('');
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { if (visible) { setIt(initial || blank); setAsk(''); } }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (p: Partial<FoodItem>) => setIt((x) => ({ ...x, ...p }));
-
-  const fill = async (src: 'text' | 'camera' | 'gallery') => {
-    const key = await getKey(store.data.ai.provider);
-    if (!key) { Alert.alert('Нет ключа ИИ', 'Добавьте ключ в настройках.'); return; }
-    const photos = src === 'camera' ? await fromCamera() : src === 'gallery' ? await fromGallery(2) : [];
-    if (src !== 'text' && !photos.length) return;
-    const text = src === 'text' ? ask || it.name : (ask || it.name || '');
-    if (!text && !photos.length) return;
-    setBusy(true);
-    try {
-      const r = await analyzeFood(store.data.ai, key, `Одно блюдо: ${text}`.trim(), photos.map((p) => ({ base64: p.base64, mime: p.mime })));
-      const first = r.items[0];
-      if (!first) { Alert.alert('Не распознано', r.comment || ''); return; }
-      if (r.items.length > 1) {
-        // несколько позиций — складываем в одно блюдо (неизвестное остаётся неизвестным)
-        const m = mergeItems(r.items.map(({ portion, ...x }) => ({ item: x, portion: portion || 1 })));
-        setIt({ ...m, name: it.name || m.name, explain: r.explanation, portion: undefined });
-      } else setIt({ ...first, name: it.name || first.name, portion: undefined });
-      play('ai');
-    } catch (e: any) {
-      Alert.alert('Не получилось', e?.message || String(e));
-    } finally { setBusy(false); }
-  };
+  const refine = useRefine([it], (its) => setIt((x) => ({ ...its[0], name: its[0].name || x.name, portion: undefined })));
+  useEffect(() => { if (visible) { setIt(initial || blank); refine.reset(); } }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Sheet visible={visible} onClose={onClose} title={presetId ? 'Моё блюдо' : 'Новое блюдо'}
@@ -147,19 +119,8 @@ export function PresetEditor({ visible, initial, presetId, onClose }: {
           ) : null}
         </View>
       }>
+      <RefineHistory r={refine} />
       <Field label="Название" value={it.name} onChangeText={(t) => set({ name: t })} placeholder="Например: Боул с лососем (Grow Food)" />
-      <View style={st.aiBox}>
-        <Text style={[T.small, { marginBottom: 8 }]}>Заполнить через ИИ — опишите состав или сфотографируйте</Text>
-        <TextInput value={ask} onChangeText={setAsk} placeholder="лосось 80 г, рис 120 г, авокадо, соус терияки" placeholderTextColor={C.muted}
-          multiline style={[T.body, st.ask]} />
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-          <Pressable onPress={() => fill('text')} style={[st.aiBtn, { flex: 1.4 }]} disabled={busy}>
-            {busy ? <ActivityIndicator color={C.accent} /> : <><Icon name="sparkle" size={18} color={C.accent} /><Text style={st.aiBtnT}>Посчитать</Text></>}
-          </Pressable>
-          <Pressable onPress={() => fill('camera')} style={st.aiBtn} disabled={busy}><Icon name="camera" size={20} color={C.accent} /></Pressable>
-          <Pressable onPress={() => fill('gallery')} style={st.aiBtn} disabled={busy}><Icon name="image" size={20} color={C.accent} /></Pressable>
-        </View>
-      </View>
       <View style={{ gap: 10, marginTop: 14 }}>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <NumField optional label="Ккал" value={it.kcal} onChange={(n) => set({ kcal: n })} style={{ flex: 1 }} />
@@ -177,7 +138,7 @@ export function PresetEditor({ visible, initial, presetId, onClose }: {
         <Field label="Заметка" value={it.note || ''} onChangeText={(t) => set({ note: t })} placeholder="состав, откуда" />
         <ExplainButton items={[it]} />
       </View>
-      {it.name.trim() ? <DishAssist items={[it]} onItems={(its) => setIt({ ...its[0], portion: undefined })} placeholder="Уточнить для ИИ: «без соуса», «порция 300 г»…" /> : null}
+      <RefineInput r={refine} photos title="Посчитать с ИИ" placeholder="Опишите состав или уточните: «лосось 80 г, рис 120 г», «без соуса»…" />
     </Sheet>
   );
 }

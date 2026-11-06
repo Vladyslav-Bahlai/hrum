@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/RNText';
 import { play } from '../sound';
@@ -7,12 +7,12 @@ import { ActBtn, Btn, NumField, Seg } from '../ui/kit';
 import { Icon } from '../ui/Icon';
 import { useToast } from '../ui/Toast';
 import { useStore } from '../store';
-import { analyzeFood } from '../ai';
+import { analyzeFood, isCancelled } from '../ai';
+import { ModelSelect } from './ModelPopup';
 import { getKey } from '../storage';
 import { FoodItem } from '../types';
 import { addDays, known, plural, todayKey } from '../utils';
 const X = TABS.fill;
-const XD = shade(X.accent, 0.72);
 
 type F = 'kcal' | 'protein' | 'fat' | 'carbs';
 const FIELDS: { k: F; label: string }[] = [
@@ -44,6 +44,7 @@ export function FillScreen({ topInset }: { topInset: number }) {
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [aiSet, setAiSet] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const ctl = useRef<AbortController | null>(null);
 
   // что уже где-то известно про блюдо с таким названием: «Мои блюда» → меню → прошлые записи
   const best = useMemo(() => {
@@ -136,11 +137,12 @@ export function FillScreen({ topInset }: { topInset: number }) {
     const key = await getKey(data.ai.provider);
     if (!key) { Alert.alert('Нет ключа ИИ', 'Добавьте ключ в настройках — или заполните значения вручную.'); return; }
     setBusy(true);
+    const c = new AbortController(); ctl.current = c;
     try {
       const list = todo.slice(0, 25);
       const text = `Оцени пищевую ценность ОДНОЙ стандартной порции каждого блюда из списка. Верни РОВНО ${list.length} позиций в том же порядке, по одной на строку списка. Название оставь как есть.\n` +
         list.map((g, i) => `${i + 1}. ${g.name}`).join('\n');
-      const res = await analyzeFood(data.ai, key, text, [], { mode: 'eat' });
+      const res = await analyzeFood(data.ai, key, text, [], { mode: 'eat', signal: c.signal });
       const byIndex = res.items.length === list.length;
       const picked = new Set(aiSet);
       const nextDrafts = { ...drafts };
@@ -158,8 +160,9 @@ export function FillScreen({ topInset }: { topInset: number }) {
       setAiSet(picked);
       play('ai');
     } catch (e: any) {
-      Alert.alert('Не получилось', e?.message || String(e));
+      if (!isCancelled(e)) Alert.alert('Не получилось', e?.message || String(e));
     } finally {
+      ctl.current = null;
       setBusy(false);
     }
   };
@@ -180,7 +183,10 @@ export function FillScreen({ topInset }: { topInset: number }) {
         {visible.length ? (
           <>
             <View style={{ gap: 8, marginBottom: 12 }}>
-              <ActBtn label={busy ? 'ИИ считает…' : 'Заполнить через ИИ'} icon="sparkle" onPress={askAI} style={{ flex: 0 }} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <ActBtn label={busy ? 'Отменить запрос' : 'Заполнить через ИИ'} icon={busy ? 'close' : 'sparkle'} danger={busy} onPress={busy ? () => ctl.current?.abort() : askAI} style={{ flex: 1 }} />
+                <ModelSelect height={44} />
+              </View>
               {readyGroups.length ? (
                 <Btn label={`Применить всё · ${readyGroups.length} ${plural(readyGroups.length, 'блюдо', 'блюда', 'блюд')}`} icon="check" onPress={() => applyMany(readyGroups)} />
               ) : null}

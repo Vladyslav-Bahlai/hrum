@@ -15,7 +15,6 @@ import { packStore } from '../storage';
 import { minutesLabel, parseTime, toKey, uid, fromKey, timestampAt, formatTimeInput } from '../utils';
 import { sortLog } from '../logic';
 const X = TABS.settings;
-const XD = shade(X.accent, 0.72);
 
 function Toggle({ label, hint, on, onChange }: { label: string; hint?: string; on: boolean; onChange: (v: boolean) => void }) {
   return (

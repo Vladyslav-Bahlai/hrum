@@ -19,7 +19,7 @@ import { AskHint, ChatMini, useAskHint } from './ChatSlot';
 import { askHintVisible } from '../chat';
 import { ChatScreen } from './ChatScreen';
 import { AttachSheet, PlusBtn } from './AttachSheet';
-import { ModelPill, ModelPopup } from './ModelPopup';
+import { ModelSelect } from './ModelPopup';
 import { PresetEditor } from './Dishes';
 import { kcalText } from '../utils';
 import { useChat } from './useChat';
@@ -55,7 +55,6 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const [picking, setPicking] = useState(false);
   const { data } = useStore();
-  const [modelOpen, setModelOpen] = useState(false);
   const [favOpen, setFavOpen] = useState(false); // окно «Избранное»
   const [presetNew, setPresetNew] = useState(false); // создание избранного блюда прямо отсюда
   const [attachOpen, setAttachOpen] = useState(false);
@@ -66,7 +65,7 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
   // полноэкранный чат сворачивается/разворачивается плавно: слой остаётся смонтированным, пока идёт анимация
   const chatA = useRef(new Animated.Value(0)).current;
   const [chatMounted, setChatMounted] = useState(false);
-  const { height: winH } = useWindowDimensions();
+  const { height: winH, width: winW } = useWindowDimensions();
   const chat = useChat();
   const ask = mode === 'ask';
   const model = data.ai.provider === 'claude' ? data.ai.claudeModel : data.ai.geminiModel;
@@ -77,12 +76,16 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
   const [mounted, setMounted] = useState(false);
   const [bump, setBump] = useState(0); // любое касание панели сбрасывает таймер сворачивания
   const t = useRef(new Animated.Value(0)).current; // 0 — кнопка, 1 — панель
+  const ripple = useRef(new Animated.Value(0)).current; // волна от кнопки при нажатии
   const expand = () => {
     setMounted(true);
     setOpen(true);
     if (mode === 'ask') setChatView('full');
     setBump((x) => x + 1);
-    Animated.timing(t, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    ripple.setValue(0);
+    Animated.timing(ripple, { toValue: 1, duration: 560, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+    // панель «вырастает» из кнопки: пружина даёт мягкий, живой отскок
+    Animated.spring(t, { toValue: 1, damping: 15, stiffness: 190, mass: 0.9, useNativeDriver: true }).start();
   };
   const collapse = () => {
     Keyboard.dismiss();
@@ -96,10 +99,10 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
 
   useEffect(() => {
     if (!open) return;
-    if (!panelIsIdle({ focus, text, photos: photos.length, busy: busy || chat.sending, sheetOpen: modelOpen || favOpen || presetNew || attachOpen || chatView !== 'closed', picking })) return;
+    if (!panelIsIdle({ focus, text, photos: photos.length, busy: busy || chat.sending, sheetOpen: favOpen || presetNew || attachOpen || chatView !== 'closed', picking })) return;
     const id = setTimeout(() => collapseRef.current(), PANEL_IDLE_MS);
     return () => clearTimeout(id);
-  }, [open, focus, text, photos.length, busy, chat.sending, modelOpen, favOpen, presetNew, attachOpen, chatView, picking, bump]);
+  }, [open, focus, text, photos.length, busy, chat.sending, favOpen, presetNew, attachOpen, chatView, picking, bump]);
 
   // ---- подъём над клавиатурой (Android в edge-to-edge окно не ужимает) ----
   const kb = useKeyboardHeight();
@@ -150,14 +153,19 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
   };
 
   const fabStyle = {
-    opacity: t.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: 'clamp' as const }),
-    transform: [{ scale: t.interpolate({ inputRange: [0, 1], outputRange: [1, 0.4] }) }],
+    opacity: t.interpolate({ inputRange: [0, 0.45], outputRange: [1, 0], extrapolate: 'clamp' as const }),
+    transform: [{ scale: t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.12, 0.5], extrapolate: 'clamp' as const }) }],
   };
+  // плюс крутится на 135° и превращается в «✕», пока панель растёт из угла кнопки
+  const plusSpin = { transform: [{ rotate: t.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '135deg'], extrapolate: 'clamp' as const }) }] };
+  const ph = panelH || 140;
   const panelStyle = {
-    opacity: t.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0.2, 1] }),
+    opacity: t.interpolate({ inputRange: [0, 0.3, 0.7], outputRange: [0, 0.35, 1], extrapolate: 'clamp' as const }),
     transform: [
-      { translateY: t.interpolate({ inputRange: [0, 1], outputRange: [36, 0] }) },
-      { scale: t.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1] }) },
+      // масштаб считается от правого нижнего угла (там кнопка): сдвиг компенсирует центр масштабирования
+      { translateX: t.interpolate({ inputRange: [0, 1], outputRange: [(winW / 2 - 52) * 0.85, 0] }) },
+      { translateY: t.interpolate({ inputRange: [0, 1], outputRange: [ph / 2 - 20, 0] }) },
+      { scale: t.interpolate({ inputRange: [0, 1], outputRange: [0.15, 1] }) },
     ],
   };
 
@@ -170,7 +178,6 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
   const inT = useRef(new Animated.Value(0)).current;
   useEffect(() => { Animated.timing(inT, { toValue: buttonInside ? 1 : 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start(); }, [buttonInside, inT]);
   const outside = () => {
-    if (modelOpen) { setModelOpen(false); return; }
     if (outsideTapAction({ text, photos: photos.length, askMode: ask }) === 'collapse') collapse();
     else Keyboard.dismiss();
   };
@@ -192,9 +199,10 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
             <Icon name="starFill" size={24} color={C.fat} />
           </Pressable>
           <Pressable testID="fab" accessibilityLabel="Добавить еду" onPress={expand} style={({ pressed }) => [s.fab, pressed && { transform: [{ scale: 0.94 }] }]}>
-            <Icon name="plus" size={34} color={C.white} stroke={2.4} />
+            <Animated.View style={plusSpin}><Icon name="plus" size={34} color={C.white} stroke={2.4} /></Animated.View>
           </Pressable>
         </Animated.View>
+        <Animated.View pointerEvents="none" style={[s.ripple, { opacity: ripple.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }), transform: [{ scale: ripple.interpolate({ inputRange: [0, 1], outputRange: [1, 2.6] }) }] }]} />
 
         {mounted ? (
           <Animated.View pointerEvents={open ? 'box-none' : 'none'} style={[panelStyle, { width: '100%' }]} onTouchStart={() => setBump((x) => x + 1)} onLayout={(e) => setPanelH(e.nativeEvent.layout.height)}>
@@ -236,10 +244,7 @@ export function Composer({ busy, onSubmit, onCancel, quick, onQuick, bottomInset
                   onChange={(m) => { const keep = focus || Date.now() - blurAt.current < 400; setMode(m); setChatView(m === 'ask' ? 'full' : 'closed'); setBump((x) => x + 1); if (keep) setTimeout(() => inputRef.current?.focus(), 0); }} />
               ) : null}
               {showChip ? (
-                <View style={{ flexShrink: 1 }}>
-                  <ModelPill onPress={() => setModelOpen((x) => !x)} open={modelOpen} />
-                  {modelOpen ? <ModelPopup onClose={() => setModelOpen(false)} style={{ position: 'absolute', left: 0, bottom: 40 }} /> : null}
-                </View>
+                <ModelSelect />
               ) : null}
             </View>
 
@@ -422,6 +427,7 @@ const s = StyleSheet.create({
     width: 68, height: 68, borderRadius: 34, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
     shadowColor: '#0F2A1C', shadowOpacity: 0.28, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 10,
   },
+  ripple: { position: 'absolute', right: 18, bottom: 0, width: 68, height: 68, borderRadius: 34, backgroundColor: C.accent },
   quickWrap: { marginBottom: 6 },
   favFab: {
     width: 48, height: 48, borderRadius: 24, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12,

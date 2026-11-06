@@ -10,7 +10,6 @@ import { Entry } from '../types';
 import { dayTarget } from '../logic';
 import { addDays, fmt, fromKey, hasAnyMacros, known, kcalOf, getMeals, nut, r0, r1, shortDate, sum, todayKey, WD_SHORT, plural } from '../utils';
 const X = TABS.stats;
-const XD = shade(X.accent, 0.72);
 
 type Period = 7 | 30 | 90;
 

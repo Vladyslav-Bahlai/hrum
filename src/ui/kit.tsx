@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, noOutline, RADIUS, T, TabTone, TABS } from '../theme';
 import { Icon, IconName } from './Icon';
+import { LayerRoot } from './Layer';
 
 /** Цвета текущей вкладки для общих кнопок/вкладок/чипов (по умолчанию — зелёный дневника). */
 export const ToneCtx = React.createContext<TabTone>(TABS.day);
@@ -93,7 +94,7 @@ export function ActBtn({ label, icon, onPress, danger, on, style, textColor }: {
   const fg = textColor || (danger ? C.over : tone.accent);
   return (
     <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={label || undefined}
-      style={({ pressed }) => [{ flex: 1, minWidth: 0, minHeight: 48, borderRadius: 12, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12,
+      style={({ pressed }) => [{ flex: 1, minWidth: 0, minHeight: 48, borderRadius: 12, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10,
         backgroundColor: danger ? C.overSoft : on ? tone.soft : tone.tint, borderWidth: StyleSheet.hairlineWidth, borderColor: danger ? '#E9C9C0' : C.lineStrong, opacity: pressed ? 0.7 : 1 }, style,
         // кнопка фиксированной ширины (звезда, корзина): на вебе flex:0 давал нулевую ширину
         (style as any)?.width !== undefined ? { flexBasis: 'auto' as any, flexShrink: 0 } : null]}>
@@ -264,6 +265,7 @@ export function Sheet({ visible, onClose, title, children, footer, scrollEnabled
   return (
     <Modal visible={shown} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <GestureHandlerRootView style={{ flex: 1 }}>
+      <LayerRoot>
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(16,24,19,0.32)', opacity: a }]} />
       <View style={{ flex: 1, paddingBottom: lift }}>
         <Pressable accessibilityLabel="Закрыть" style={{ flex: 1 }} onPress={close} />
@@ -287,6 +289,7 @@ export function Sheet({ visible, onClose, title, children, footer, scrollEnabled
           {footer ? <View onLayout={(e) => setFootH(e.nativeEvent.layout.height)} style={{ paddingHorizontal: 20, paddingTop: 8 }}>{footer}</View> : null}
         </Animated.View>
       </View>
+      </LayerRoot>
       </GestureHandlerRootView>
     </Modal>
   );

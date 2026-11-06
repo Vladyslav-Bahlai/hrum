@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { ActivityIndicator, Alert, Animated, Easing, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/RNText';
 import { play } from '../sound';
 import { C, T, TABS, shade } from '../theme';
 import { Icon } from '../ui/Icon';
-import { ActBtn, Btn, Chip, Field, NumField, Sheet, Unk } from '../ui/kit';
+import { ActBtn, Btn, Chip, Field, NumField, Sheet } from '../ui/kit';
 import { AmountPicker } from '../ui/Amount';
 import { useStore } from '../store';
-import { analyzeFood } from '../ai';
-import { getKey, persistPhoto } from '../storage';
+import { analyzeFood, isCancelled } from '../ai';
+import { ModelSelect } from './ModelPopup';
+import { getKey } from '../storage';
 import { fromCamera, fromGallery, Picked } from '../media';
 import { Entry, FoodItem, Menu } from '../types';
 import { DayTitle } from '../ui/DayTitle';
@@ -20,9 +22,8 @@ import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { DishesView, DishPicker } from './Dishes';
 import { DishIcon } from '../ui/DishIcon';
 import { IconPicker } from './IconPicker';
-import { DishAssist, ExplainButton } from './DishAssist';
+import { ExplainButton, RefineHistory, RefineInput, useRefine } from './DishAssist';
 const X = TABS.menu;
-const XD = shade(X.accent, 0.72);
 
 /** Вкладка «Меню»: сохранённые меню, добавление блюда в дневник одним тапом. */
 export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, request, onAdd, onAddAll, onAddDish, onUpdateEntry, onRemoveEntry, onRequestDone }: {
@@ -47,7 +48,7 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
   canNext: boolean;
 }) {
   const store = useStore();
-  const [view, setView] = useState<'menu' | 'dishes'>('menu');
+  const [view, setView] = useState<'menu' | 'dishes' | 'old'>('menu');
   // меню показываются только на тех днях, к которым привязаны (будущие дни — пустые, без «вчерашнего»)
   const menus = useMemo(() => store.data.menus.filter((m) => m.dates.includes(date)), [store.data.menus, date]);
   const toast = useToast();
@@ -74,6 +75,8 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
     setAmount(lastEntry ? lastEntry.portion : 1);
     setRefined(lastEntry && menuNow && JSON.stringify([lastEntry.item.kcal, lastEntry.item.protein, lastEntry.item.fat, lastEntry.item.carbs, lastEntry.item.note]) !== JSON.stringify([portionFor.item.kcal, portionFor.item.protein, portionFor.item.fat, portionFor.item.carbs, portionFor.item.note]) ? lastEntry.item : null);
   }, [portionFor?.index, portionFor?.item.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  const refineP = useRefine([refined || portionFor?.item || { name: '' }], (its, orig) => setRefined(orig ? null : its[0]));
+  useEffect(() => { refineP.reset(); }, [portionFor?.index, portionFor?.item.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // название остаётся как в меню (по нему считается «съедено»), что изменил ИИ — в заметке
   const asEaten = (orig: FoodItem, r: FoodItem | null): FoodItem => (!r ? orig : { ...r, name: orig.name, section: orig.section, note: r.name.trim() !== orig.name.trim() ? `${r.name}${r.note ? ' — ' + r.note : ''}` : r.note });
 
@@ -109,6 +112,7 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
   }, [menu]);
 
   const total = menu ? sum(menu.items.map((item) => ({ item, portion: 1 } as any))) : null;
+  const eatenKcal = menu ? store.data.entries.filter((e) => e.date === date && e.menuId === menu.id).reduce((a, e) => a + (known(e.item).kcal ? e.item.kcal! * e.portion : 0), 0) : 0;
 
   const add = (item: FoodItem, portion: number) => {
     if (!menu) return;
@@ -124,10 +128,16 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
         <Pressable accessibilityLabel="Следующий день" onPress={() => go(1)} disabled={!canNext} hitSlop={8} style={{ padding: 6, opacity: canNext ? 1 : 0.3 }}><Icon name="right" size={24} color={canNext ? C.inkSoft : C.line} /></Pressable>
       </View>
 
-      <Tabs items={[{ key: 'menu', label: 'Меню дня', n: menus.length || undefined }, { key: 'dishes', label: 'Мои блюда', n: store.data.favorites.length || undefined }]}
+      <Tabs items={[{ key: 'menu', label: 'Меню дня', n: menus.length || undefined }, { key: 'dishes', label: 'Мои блюда', n: store.data.favorites.length || undefined }, { key: 'old', label: 'Старые меню', n: store.data.menus.filter((m) => m.done).length || undefined }]}
         value={view} onChange={setView} style={{ paddingHorizontal: 20 }} />
 
       {view === 'dishes' ? <DishesView onAdd={onAddDish} /> : null}
+      {view === 'old' ? (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 230 }} keyboardShouldPersistTaps="handled">
+          <Text style={[T.small, { marginBottom: 12 }]}>Меню, отмеченные как полностью съеденные. В списки «Из прошлых» они не попадают — найти их можно только здесь.</Text>
+          <PastMenus date={date} only="done" onTaken={(id) => { setSel(id); setView('menu'); }} onAll={() => {}} />
+        </ScrollView>
+      ) : null}
 
       {showPills ? (
         <View style={{ flexGrow: 0, flexShrink: 0 }}>
@@ -167,19 +177,13 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
             </View>
           ) : null}
           <View style={st.paper}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-              <View style={{ flex: 1 }}>
-                <Text style={[T.h2, { textAlign: 'left' }]}>{menu.title}</Text>
-                {total ? (
-                  <Text style={[T.small, { marginTop: 3 }]}>
-                    {menu.items.length} блюд · всего {fmt(total.kcal)}{total.unk.kcal ? <Unk /> : null} ккал · Б {r0(total.protein)}{total.unk.protein ? <Unk /> : null} Ж {r0(total.fat)}{total.unk.fat ? <Unk /> : null} У {r0(total.carbs)}{total.unk.carbs ? <Unk /> : null}
-                  </Text>
-                ) : null}
-              </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[T.h2, { textAlign: 'left', flex: 1 }]} numberOfLines={2}>{menu.title}</Text>
               <Pressable onPress={() => setEdit(menu)} hitSlop={10} style={{ padding: 4 }}>
                 <Icon name="edit" size={20} color={C.inkSoft} />
               </Pressable>
             </View>
+            {total ? <MenuSummary total={total} count={menu.items.length} eatenKcal={eatenKcal} /> : null}
 
             {sections.map((sec, si) => (
               <View key={si} style={{ marginTop: 18 }}>
@@ -221,10 +225,24 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
                           </View>
                         ) : null}
                       </View>
-                      <Pressable accessibilityLabel={`Добавить: ${it.name}`} onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} hitSlop={6}
-                        style={({ pressed }) => [st.plus, n || closed ? { backgroundColor: X.soft } : null, pressed && { transform: [{ scale: 0.92 }] }]}>
-                        <Icon name="plus" size={24} color={n || closed ? X.accent : C.white} stroke={2.4} />
-                      </Pressable>
+                      <View style={{ alignItems: 'center', gap: 6 }}>
+                        <Pressable accessibilityLabel={`Добавить: ${it.name}`} onPress={() => setPortionFor({ item: it, index: menu.items.indexOf(it) })} hitSlop={6}
+                          style={({ pressed }) => [st.plus, n || closed ? { backgroundColor: X.soft } : null, pressed && { transform: [{ scale: 0.92 }] }]}>
+                          <Icon name="plus" size={24} color={n || closed ? X.accent : C.white} stroke={2.4} />
+                        </Pressable>
+                        {n > 0 || closed ? (
+                          <Pressable accessibilityLabel={closed ? `Снова открыть: ${it.name}` : `Закрыть блюдо: ${it.name}`} hitSlop={6}
+                            onPress={() => {
+                              const name = it.name; const was = closed;
+                              store.setDishClosed(menu.id, name, !was);
+                              toast({ text: was ? `«${name}» снова в меню` : `«${name}» закрыто`, action: 'Отменить', onAction: () => store.setDishClosed(menu.id, name, was) });
+                            }}
+                            style={({ pressed }) => [st.quick, closed && st.quickOn, pressed && { opacity: 0.6 }]}>
+                            <Icon name={closed ? 'repeat' : 'check'} size={13} color={closed ? C.muted : X.accent} stroke={2.4} />
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: closed ? C.muted : X.accent }}>{closed ? 'Открыть' : 'Закрыть'}</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
                     </Pressable>
                   );
                 })}
@@ -241,7 +259,6 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
             })()}
             <Text style={[T.small, { textAlign: 'center', marginTop: 12 }]}>«+» — целая порция · нажмите на блюдо — порция или граммы</Text>
           </View>
-          {menu.photo ? <Image source={{ uri: menu.photo }} style={{ marginHorizontal: 16, marginTop: 14, height: 160, borderRadius: 12, opacity: 0.9 }} resizeMode="cover" /> : null}
         </ScrollView>
       )}
 
@@ -267,9 +284,9 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <ActBtn label="Заменить" icon="repeat" onPress={() => { setReplace({ index: portionFor.index }); setPortionFor(null); }} />
                 <ActBtn label="Изменить" icon="edit" onPress={() => { setEditIndex(portionFor.index); setEdit(menu); setPortionFor(null); }} />
-                <ActBtn label="" icon={store.isFavorite(portionFor.item) ? 'starFill' : 'star'} on={store.isFavorite(portionFor.item)} style={{ flex: 0, width: 52, paddingHorizontal: 0 }}
+                <ActBtn label="" icon={store.isFavorite(portionFor.item) ? 'starFill' : 'star'} on={store.isFavorite(portionFor.item)} style={{ flex: 0, width: 46, paddingHorizontal: 0 }}
                   onPress={() => { store.isFavorite(portionFor.item) ? store.toggleFavorite(portionFor.item) : store.savePreset(portionFor.item); }} />
-                <ActBtn label="" icon="trash" danger style={{ flex: 0, width: 52, paddingHorizontal: 0 }}
+                <ActBtn label="" icon="trash" danger style={{ flex: 0, width: 46, paddingHorizontal: 0 }}
                   onPress={() => {
                     const it = portionFor.item; const idx = portionFor.index;
                     Alert.alert('Убрать блюдо из меню?', `«${it.name}» исчезнет из меню. Записи в дневнике останутся.`, [
@@ -280,23 +297,15 @@ export function MenuScreen({ date, go, canNext, openCalendar, topInset, bottom, 
               </View>
             </View>
           }>
+          <RefineHistory r={refineP} />
           {(() => { const ds = dishState(eaten[portionFor.item.name] || 0, isClosed(menu, portionFor.item.name)); return ds.kind !== 'none' ? <Text style={[T.small, { marginBottom: 6, color: X.accent, fontWeight: '700' }]}>{ds.label}</Text> : null; })()}
           <Text style={[T.small, { marginBottom: 12 }]}>
             Полная порция: {kcalText(portionFor.item)}{portionFor.item.grams ? ` · ${r0(portionFor.item.grams)} г` : ''} · {macroText(portionFor.item)}
           </Text>
-          {refined ? (
-            <View style={st.refined}>
-              <Text style={[T.label, { color: X.accent }]}>Уточнено с ИИ</Text>
-              <Text style={[T.h3, { marginTop: 2 }]}>{refined.name}</Text>
-              <Text style={[T.small, { marginTop: 2 }]}>{kcalText(refined)}{refined.grams ? ` · ${r0(refined.grams)} г` : ''} · {macroText(refined)}</Text>
-              {refined.note ? <Text style={[T.small, { color: C.inkSoft, marginTop: 2 }]}>{refined.note}</Text> : null}
-              <ActBtn label="Вернуть как в меню" icon="repeat" onPress={() => setRefined(null)} style={{ flex: 0, marginTop: 8 }} />
-            </View>
-          ) : null}
           <AmountPicker big value={amount} onChange={setAmount} gramsPerPortion={(refined || portionFor.item).grams} kcalPerPortion={(refined || portionFor.item).kcal}
             onGramsKnown={(g) => { const it = { ...portionFor.item, grams: g }; store.replaceMenuItem(menu.id, portionFor.index, it); setPortionFor({ ...portionFor, item: it }); }} />
           <View style={{ marginTop: 12 }}><ExplainButton items={[refined || portionFor.item]} /></View>
-          <DishAssist items={[refined || portionFor.item]} onItems={(its, orig) => setRefined(orig ? null : its[0])} placeholder="Уточнить для ИИ: «съел только мясо», «без гарнира»…" />
+          <RefineInput r={refineP} placeholder="Уточнить для ИИ: «съел только мясо», «без гарнира»…" />
         </Sheet>
       ) : null}
 
@@ -341,6 +350,7 @@ function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }:
   const [text, setText] = useState('');
   const [photos, setPhotos] = useState<Picked[]>([]);
   const [busy, setBusy] = useState(false);
+  const ctl = useRef<AbortController | null>(null);
 
   useEffect(() => { if (visible) { setText(''); setPhotos([]); } }, [visible]);
 
@@ -358,11 +368,12 @@ function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }:
       return;
     }
     setBusy(true);
+    const ac = new AbortController(); ctl.current = ac;
     try {
       // каждое фото — отдельное меню (несколько страниц/дней не склеиваются в одно)
       const jobs: (Picked | null)[] = photos.length ? photos : [null];
       const results = await Promise.allSettled(jobs.map((p) =>
-        analyzeFood(data.ai, key, text || 'Распознай меню на фото.', p ? [{ base64: p.base64, mime: p.mime }] : [], { mode: 'menu', refDate: date })));
+        analyzeFood(data.ai, key, text || 'Распознай меню на фото.', p ? [{ base64: p.base64, mime: p.mime }] : [], { mode: 'menu', refDate: date, signal: ac.signal })));
       const made: Menu[] = [];
       let fail = '';
       results.forEach((r, i) => {
@@ -374,17 +385,18 @@ function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }:
         made.push({
           id: uid(), title: aiTitle || (jobs.length > 1 ? `${menuTitleFor(date)} · ${i + 1}` : menuTitleFor(date)), created: Date.now() + i, dates: [date],
           items: r.value.items.map(({ portion, ...it }) => it),
-          photo: p ? persistPhoto(p.uri) : undefined,
         });
       });
+      if (ac.signal.aborted) return;
       if (!made.length) { Alert.alert('Меню не распознано', fail || 'Попробуйте фото почётче или текстом.'); return; }
       play('ai');
       if (fail) Alert.alert('Часть меню не распознана', `Создано: ${made.length} из ${jobs.length}. ${fail}`);
       if (made.length === 1) onParsed(made[0]);
       else onMany(made);
     } catch (e: any) {
-      Alert.alert('Не получилось', e?.message || String(e));
+      if (!isCancelled(e)) Alert.alert('Не получилось', e?.message || String(e));
     } finally {
+      ctl.current = null;
       setBusy(false);
     }
   };
@@ -392,7 +404,11 @@ function MenuCreateSheet({ visible, date, onClose, onParsed, onMany, onManual }:
   const can = (text.trim() || photos.length) && !busy;
   return (
     <Sheet visible={visible} onClose={onClose} title="Новое меню"
-      footer={<Btn label={busy ? 'Распознаю меню…' : 'Распознать'} onPress={run} disabled={!can} style={{ paddingVertical: 16 }} />}>
+      footer={<View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <ModelSelect height={44} />
+        {busy ? <ActBtn label="Отменить запрос" icon="close" danger onPress={() => ctl.current?.abort()} style={{ flex: 1, minHeight: 54 }} />
+          : <Btn label="Распознать" onPress={run} disabled={!can} style={{ paddingVertical: 16, flex: 1 }} />}
+      </View>}>
       <ActBtn label="Собрать меню вручную" icon="edit" onPress={onManual} style={{ flex: 0, marginBottom: 16, minHeight: 54 }} />
       <Text style={[T.bodySoft, { marginBottom: 14 }]}>Или сфотографируйте меню / вставьте текст — ИИ разберёт сам. Несколько фото — несколько отдельных меню (по одному на фото).</Text>
       <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -428,12 +444,44 @@ const blankMenu = (date: string): Menu => ({ id: uid(), title: menuTitleFor(date
 const SECTIONS = ['Завтрак', 'Второй завтрак', 'Обед', 'Салат', 'Ужин', 'Второй ужин'];
 
 /** Конструктор / редактор меню: разделы, нумерованные блюда, порядок, значения (необязательные). */
+/** Компактная «шкала меню»: калории всего, сколько съедено, БЖУ — тёплые жёлтые тона, одна строка плюс полоска. */
+function MenuSummary({ total, count, eatenKcal }: { total: ReturnType<typeof sum>; count: number; eatenKcal: number }) {
+  const pct = total.kcal > 0 ? Math.min(1, eatenKcal / total.kcal) : 0;
+  const mac = [{ l: 'Б', v: total.protein, u: total.unk.protein }, { l: 'Ж', v: total.fat, u: total.unk.fat }, { l: 'У', v: total.carbs, u: total.unk.carbs }];
+  return (
+    <LinearGradient colors={['#FBEFC6', '#F3E2A9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={st.sum} testID="menu-summary">
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+            <Text style={[T.h1, { fontSize: 28, lineHeight: 32, color: '#5E4710' }]}>{fmt(total.kcal)}{total.unk.kcal ? '+' : ''}</Text>
+            <Text style={{ fontSize: 13, color: '#8A6A24', fontWeight: '700' }}>ккал · {count} {plural(count, 'блюдо', 'блюда', 'блюд')}</Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          {mac.map((m) => (
+            <View key={m.l} style={st.sumChip}>
+              <Text style={{ fontSize: 11, color: '#8A6A24', fontWeight: '700' }}>{m.l}</Text>
+              <Text style={{ fontSize: 14, color: '#4A3A0C', fontWeight: '800' }}>{r0(m.v)}{m.u ? '+' : ''}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+      <View style={st.sumBar}><View style={[st.sumFill, { width: `${pct * 100}%` }]} /></View>
+      <Text style={{ fontSize: 12.5, color: '#7A5F1A', fontWeight: '600', marginTop: 5 }}>
+        {eatenKcal > 0 ? `съедено ${fmt(eatenKcal)} · осталось ${fmt(Math.max(0, total.kcal - eatenKcal))} ккал` : 'пока ничего не отмечено'}
+      </Text>
+    </LinearGradient>
+  );
+}
+
 function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }: { menu: Menu; openIndex?: number | null; onClose: () => void; onSave: (m: Menu) => void; onDelete?: () => void; onDetach?: () => void }) {
   const isNew = !onDelete;
   const [m, setM] = useState<Menu>(menu);
   const [open, setOpen] = useState<number | null>(openIndex ?? null);
   const [picker, setPicker] = useState<string | null>(null); // раздел, в который добавляем из «Моих блюд» ('' — без раздела)
   const setItem = (i: number, patch: Partial<FoodItem>) => setM((x) => ({ ...x, items: x.items.map((it, j) => (j === i ? { ...it, ...patch } : it)) }));
+  const refine = useRefine(open !== null && m.items[open] ? [m.items[open]] : [], (its) => { if (open !== null) setItem(open, { ...its[0], section: m.items[open]?.section }); });
+  useEffect(() => { refine.reset(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Вставляет блюдо после последнего блюда того же раздела — чтобы разделы не разваливались. */
   const insert = (section: string | undefined, base?: FoodItem): number => {
@@ -466,6 +514,7 @@ function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }:
           </View>
         </View>
       }>
+      <RefineHistory r={refine} />
       <Field label="Название меню" placeholder="Например: Понедельник, 2 ноября" value={m.title} onChangeText={(t) => setM((x) => ({ ...x, title: t }))} />
 
       {m.items.length ? (
@@ -513,7 +562,7 @@ function MenuEditSheet({ menu, openIndex, onClose, onSave, onDelete, onDetach }:
                     <NumField optional label="Углев." suffix="г" value={it.carbs} onChange={(n) => setItem(i, { carbs: n })} style={{ flex: 1 }} />
                   </View>
                   <ExplainButton items={[it]} />
-                  <DishAssist items={[it]} onItems={(its) => setItem(i, { ...its[0], section: it.section })} placeholder="Попросить ИИ: «пересчитай на 250 г», «это без масла»…" />
+                  <RefineInput r={refine} placeholder="Попросить ИИ: «пересчитай на 250 г», «это без масла»…" />
                   <View style={{ flexDirection: 'row', gap: 8 }}>
                     <ActBtn label="Выше" icon="left" onPress={() => move(i, -1)} style={{ opacity: i === 0 ? 0.4 : 1 }} />
                     <ActBtn label="Ниже" icon="right" onPress={() => move(i, 1)} style={{ opacity: i === m.items.length - 1 ? 0.4 : 1 }} />
@@ -565,6 +614,12 @@ const st = StyleSheet.create({
   numT: { fontFamily: 'Lora_600SemiBold', fontSize: 16, color: X.accent },
   dish: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   dots: { flex: 1, minWidth: 12, marginHorizontal: 6, borderBottomWidth: 1, borderStyle: 'dotted', borderColor: C.lineStrong, marginBottom: 4 },
+  quick: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 26, paddingHorizontal: 9, borderRadius: 13, backgroundColor: X.tint, borderWidth: StyleSheet.hairlineWidth, borderColor: X.accent },
+  quickOn: { backgroundColor: C.paper, borderColor: C.lineStrong },
+  sum: { marginTop: 12, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: '#E6CF8E' },
+  sumChip: { alignItems: 'center', minWidth: 38, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.55)' },
+  sumBar: { height: 6, borderRadius: 3, backgroundColor: 'rgba(138,106,36,0.18)', overflow: 'hidden', marginTop: 9 },
+  sumFill: { height: 6, borderRadius: 3, backgroundColor: '#C99A1E' },
   plus: { width: 48, height: 48, borderRadius: 24, backgroundColor: X.accent, alignItems: 'center', justifyContent: 'center' },
   rest: { backgroundColor: '#F7EFD9' },
   closedTag: { backgroundColor: C.line },
@@ -591,17 +646,17 @@ const st = StyleSheet.create({
 });
 
 /** Прошлые меню: последние три (без «съеденных») и «Показать все». Нажатие раскрывает состав, повторное — закрывает. */
-function PastMenus({ date, limit, onTaken, onAll, showAll }: { date: string; limit?: number; onTaken: (id: string) => void; onAll: () => void; showAll?: boolean }) {
+function PastMenus({ date, limit, onTaken, onAll, showAll, only = 'fresh' }: { date: string; limit?: number; onTaken: (id: string) => void; onAll: () => void; showAll?: boolean; only?: 'fresh' | 'done' }) {
   const store = useStore();
   const [open, setOpen] = useState<string | null>(null);
-  const all = useMemo(() => [...store.data.menus].filter((m) => !m.dates.includes(date))
-    .sort((a, b) => (b.dates[b.dates.length - 1] || '').localeCompare(a.dates[a.dates.length - 1] || '') || b.created - a.created), [store.data.menus, date]);
-  const fresh = all.filter((m) => !m.done);
-  const list = showAll ? all : fresh.slice(0, limit ?? 3);
-  if (!all.length) return <Text style={[T.small, { textAlign: 'center', marginTop: 20 }]}>Прошлых меню пока нет.</Text>;
+  // съеденные меню в списки для переноса не попадают — они только во вкладке «Старые меню»
+  const all = useMemo(() => [...store.data.menus].filter((m) => (only === 'done' ? !!m.done : !m.done && !m.dates.includes(date)))
+    .sort((a, b) => (b.dates[b.dates.length - 1] || '').localeCompare(a.dates[a.dates.length - 1] || '') || b.created - a.created), [store.data.menus, date, only]);
+  const list = showAll || only === 'done' ? all : all.slice(0, limit ?? 3);
+  if (!all.length) return <Text style={[T.small, { textAlign: 'center', marginTop: 20 }]}>{only === 'done' ? 'Съеденных меню пока нет.' : 'Прошлых меню пока нет.'}</Text>;
   return (
-    <View style={{ marginTop: showAll ? 0 : 22 }}>
-      {!showAll ? <Text style={[T.label, { marginLeft: 4, marginBottom: 8 }]}>Взять из прошлых</Text> : null}
+    <View style={{ marginTop: showAll || only === 'done' ? 0 : 22 }}>
+      {!showAll && only !== 'done' ? <Text style={[T.label, { marginLeft: 4, marginBottom: 8 }]}>Взять из прошлых</Text> : null}
       {list.map((m) => {
         const isOpen = open === m.id;
         const kcal = m.items.reduce((a, b) => a + kcalOf(b), 0);

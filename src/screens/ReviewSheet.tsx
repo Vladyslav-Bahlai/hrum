@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, LayoutAnimation, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, LayoutAnimation, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Text, TextInput } from '../ui/RNText';
 import { C, T } from '../theme';
@@ -11,7 +11,7 @@ import { fmt, formatTimeInput, known, macroText, getMeals, mealAtMinutes, minute
 import { DishPicker } from './Dishes';
 import { useStore } from '../store';
 import { mergeItems } from '../logic';
-import { DishAssist, ExplainButton } from './DishAssist';
+import { ExplainButton, RefineHistory, RefineInput, useRefine } from './DishAssist';
 import { noOutline } from '../theme';
 
 export interface Draft {
@@ -117,6 +117,12 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: m
   const total = chosen.reduce((a, d) => a + (known(d.item).kcal ? d.item.kcal! * d.portion : 0), 0);
   const unkCount = chosen.filter((d) => !known(d.item).kcal).length;
   const many = drafts.length > 1;
+  const refine = useRefine(drafts.map((d) => d.item), (items) => setDrafts((cur) => {
+    // ИИ вернул столько же блюд — меняем по порядку (доли и отметки сохраняем); другое число — новый список
+    if (items.length === cur.length) return cur.map((d, j) => ({ ...d, item: { ...items[j] } }));
+    return items.map((it) => ({ item: it, portion: 1, on: true }));
+  }));
+  useEffect(() => { if (visible) refine.reset(); }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const title = mode === 'edit' ? 'Запись' : mode === 'manual' ? 'Добавить вручную' : many ? `Найдено: ${drafts.length}` : 'Проверьте';
 
@@ -129,7 +135,7 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: m
           {onDelete ? <ActBtn label="Удалить запись" icon="trash" danger onPress={onDelete} style={{ flex: 0 }} /> : null}
         </View>
       }>
-      {photo ? <Image source={{ uri: photo }} style={{ width: '100%', height: 150, borderRadius: 12, marginBottom: 12 }} /> : null}
+      <RefineHistory r={refine} />
       {comment ? <Text style={[T.bodySoft, { marginBottom: 12, fontStyle: 'italic' }]}>{comment}</Text> : null}
 
       <Seg items={getMeals().map((m) => ({ key: m.key, label: m.label }))} value={meal} onChange={(k) => { setMeal(k); setMealPicked(true); }} style={{ marginBottom: 12 }} />
@@ -249,11 +255,7 @@ export function ReviewSheet({ visible, onClose, initial, meal: meal0, minutes: m
       <View style={{ gap: 8, marginTop: 4 }}>
         <ExplainButton items={drafts.map((d) => d.item)} />
       </View>
-      <DishAssist items={drafts.map((d) => d.item)} onItems={(items) => setDrafts((cur) => {
-        // ИИ вернул столько же блюд — меняем по порядку (доли и отметки сохраняем); другое число — новый список
-        if (items.length === cur.length) return cur.map((d, j) => ({ ...d, item: { ...items[j] } }));
-        return items.map((it) => ({ item: it, portion: 1, on: true }));
-      })} />
+      <RefineInput r={refine} />
 
       {mode !== 'edit' ? (
         <ActBtn label="Ещё блюдо" icon="plus" onPress={() => { setDrafts((d) => [...d, { item: blank(), portion: 1, on: true }]); setOpen(drafts.length); }} style={{ flex: 0, marginTop: 4 }} />
@@ -294,7 +296,7 @@ function InlineKcal({ value, onChange }: { value: number | undefined; onChange: 
 
 const st = StyleSheet.create({
   inlineKcal: { padding: 0, margin: 0, textAlign: 'right', width: 92, fontFamily: T.h2.fontFamily, borderWidth: 0, backgroundColor: 'transparent' },
-  favTop: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-end', height: 44, paddingHorizontal: 14, borderRadius: 22, marginBottom: 8, backgroundColor: C.paper, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
+  favTop: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', height: 44, paddingHorizontal: 14, borderRadius: 22, marginBottom: 8, backgroundColor: C.paper, borderWidth: StyleSheet.hairlineWidth, borderColor: C.lineStrong },
   favTopOn: { backgroundColor: '#F8EFD5', borderColor: '#E6CF8E' },
   itemTarget: { borderColor: C.accent, borderWidth: 2, backgroundColor: C.accentTint },
   itemDrag: { shadowColor: '#0F2A1C', shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 12, zIndex: 10 },

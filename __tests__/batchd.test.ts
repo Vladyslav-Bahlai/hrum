@@ -79,7 +79,7 @@ describe('иконки блюд (без ИИ)', () => {
 describe('«руль» доли порции', () => {
   const marks = portionMarks(60, 34);
   test('метки 0…2 крупные, дальше шаг ½ до 10', () => {
-    expect(marks.filter((m) => m.big).map((m) => m.label)).toEqual(['0', '¼', '⅓', '½', '⅔', '¾', '1', '1¼', '1½', '1¾', '2']);
+    expect(marks.filter((m) => m.big).map((m) => m.label)).toEqual(['0', '¼', '½', '¾', '1', '1¼', '1½', '1¾', '2']);
     const small = marks.filter((m) => !m.big);
     expect(small[0].v).toBe(2.5);
     expect(small[small.length - 1].v).toBe(10);
@@ -93,8 +93,8 @@ describe('«руль» доли порции', () => {
     expect(fracLabel(2 / 3)).toBe('⅔');
     expect(markAtOffset(marks, 62).v).toBe(0.25);
     expect(markAtOffset(marks, 9999).v).toBe(10);
-    expect(markForValue(marks, 0.34).label).toBe('⅓');
-    expect(markForValue(marks, 1).x).toBe(360);
+    expect(markForValue(marks, 0.34).label).toBe('¼');
+    expect(markForValue(marks, 1).x).toBe(240);
   });
 });
 

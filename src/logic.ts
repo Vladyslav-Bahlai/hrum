@@ -1,7 +1,7 @@
 import { AISettings, AppData, Entry, FoodItem, IconRef, IconSettings, MealDef, Menu, TargetRecord, WeightPoint } from './types';
 import { chatSettings } from './chat';
 import { normalizeIconSettings } from './iconify';
-import { addDays, decimalOn, DEFAULT_MEALS, numLabel, fromKey, mealAtMinutes, minutesOf, pad, timestampAt, toKey, todayKey, uid } from './utils';
+import { addDays, decimalOn, DEFAULT_MEALS, numLabel, fromKey, mealAtMinutes, minutesOf, pad, logicalAt, timestampAt, toKey, todayKey, uid } from './utils';
 
 /** Чистые функции над данными приложения: store.tsx только вызывает их (так их можно тестировать без React). */
 
@@ -215,7 +215,7 @@ export const deckStep = (deck: { order: number[]; pos: number }, rng: () => numb
 };
 
 /** Метка времени записи после правки времени: если минуты не менялись — прежняя (порядок записей внутри минуты не ломается). */
-export const entryTimestamp = (prevTs: number, date: string, minutes: number) => (minutes === minutesOf(prevTs) ? prevTs : timestampAt(date, minutes));
+export const entryTimestamp = (prevTs: number, date: string, minutes: number) => (minutes === minutesOf(prevTs) ? prevTs : logicalAt(date, minutes));
 
 /**
  * Может ли жест начать свайп по дню. Не начинается: во время анимации, при открытом полноэкранном чате,
@@ -233,7 +233,7 @@ export const daySwipeAllowed = (o: { animating: boolean; chatOpen: boolean; dx: 
 
 /** Метка шкалы: значение, подпись, крупная ли (0…2 — крупные с широким шагом), позиция в px от начала шкалы. */
 export interface PortionMark { v: number; label: string; big: boolean; x: number }
-const FRAC: [number, string][] = [[0, '0'], [0.25, '¼'], [1 / 3, '⅓'], [0.5, '½'], [2 / 3, '⅔'], [0.75, '¾'], [1, '1'], [1.25, '1¼'], [1.5, '1½'], [1.75, '1¾'], [2, '2']];
+const FRAC: [number, string][] = [[0, '0'], [0.25, '¼'], [0.5, '½'], [0.75, '¾'], [1, '1'], [1.25, '1¼'], [1.5, '1½'], [1.75, '1¾'], [2, '2']];
 /** Подпись доли: «¼», «1½», «2½», «7»… В режиме «десятичные» — 0.5, 1.25, 7 (без «7.00»). */
 export const fracLabel = (v: number): string => {
   if (decimalOn()) return numLabel(v);
@@ -245,6 +245,8 @@ export const fracLabel = (v: number): string => {
   if (Math.abs(rest - 0.5) < 0.01) return `${whole}½`;
   if (Math.abs(rest - 0.25) < 0.01) return `${whole}¼`;
   if (Math.abs(rest - 0.75) < 0.01) return `${whole}¾`;
+  if (Math.abs(rest - 1 / 3) < 0.01) return `${whole || ''}⅓`;
+  if (Math.abs(rest - 2 / 3) < 0.01) return `${whole || ''}⅔`;
   // восьмые: 1/8, 3/8, 5/8, 7/8 — для мелкого шага
   for (const e of [1, 3, 5, 7]) if (Math.abs(rest - e / 8) < 0.01) return `${whole ? whole + ' ' : ''}${e}/8`;
   return numLabel(v);

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, ViewStyle } from 'react-native';
+import { useLayer } from '../ui/Layer';
 import { Text } from '../ui/RNText';
 import { C, T } from '../theme';
 import { Icon } from '../ui/Icon';
@@ -25,7 +26,7 @@ export function ModelPill({ onPress, open, style }: { onPress: () => void; open?
  * Небольшое плавающее окошко со списком моделей над кнопкой выбора. Не модальное: клавиатура остаётся открытой.
  * Показывает любимые модели (если выбраны), иначе все; прокручивается. Родитель кладёт его позицией absolute над кнопкой.
  */
-export function ModelPopup({ onClose, style }: { onClose: () => void; style?: ViewStyle }) {
+export function ModelPopup({ onClose, style, maxH = 190 }: { onClose: () => void; style?: ViewStyle; maxH?: number }) {
   const { data, update } = useStore();
   const [prov, setProv] = useState<Provider>(data.ai.provider);
   const cur = prov === 'claude' ? data.ai.claudeModel : data.ai.geminiModel;
@@ -44,7 +45,7 @@ export function ModelPopup({ onClose, style }: { onClose: () => void; style?: Vi
           </Pressable>
         ))}
       </View>
-      <ScrollView style={{ maxHeight: 190 }} keyboardShouldPersistTaps="always" nestedScrollEnabled showsVerticalScrollIndicator>
+      <ScrollView style={{ maxHeight: maxH }} keyboardShouldPersistTaps="always" nestedScrollEnabled showsVerticalScrollIndicator>
         {list.map((m) => {
           const on = m === cur && prov === data.ai.provider;
           return (
@@ -74,3 +75,51 @@ const s = StyleSheet.create({
   provOn: { backgroundColor: C.accent },
   row: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: 10, borderRadius: 9 },
 });
+
+const POP_W = 250;
+function Floating({ rect, onClose }: { rect: { x: number; y: number; w: number; h: number }; onClose: () => void }) {
+  const layer = useLayer();
+  const b = layer?.box || { x: 0, y: 0, w: 390, h: 800 };
+  const ax = rect.x - b.x, ay = rect.y - b.y;
+  const above = ay - 12;
+  const below = b.h - (ay + rect.h) - 12;
+  const up = above >= 150 || above >= below;
+  const maxH = Math.max(80, Math.min(220, (up ? above : below) - 54));
+  const left = Math.max(8, Math.min(ax, b.w - POP_W - 8));
+  return (
+    <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+      <Pressable accessibilityLabel="Закрыть список моделей" onPress={onClose} style={StyleSheet.absoluteFill} />
+      <ModelPopup onClose={onClose} maxH={maxH}
+        style={up ? { position: 'absolute', left, bottom: b.h - ay + 6 } : { position: 'absolute', left, top: ay + rect.h + 6 }} />
+    </View>
+  );
+}
+
+/**
+ * Кнопка выбора модели + плавающий список. Список рисуется в слое «поверх всего» и открывается ВВЕРХ от кнопки
+ * (вниз — только если сверху нет места), поэтому не вылезает за экран и его ничто не закрывает. Клавиатура не закрывается.
+ * Один и тот же блок стоит во всех ИИ-полях приложения.
+ */
+export function ModelSelect({ style, height }: { style?: ViewStyle; height?: number }) {
+  const layer = useLayer();
+  const ref = useRef<any>(null);
+  const [rect, setRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const id = useRef('model-' + Math.random().toString(36).slice(2)).current;
+  const close = () => setRect(null);
+  const toggle = () => {
+    if (rect) { close(); return; }
+    ref.current?.measureInWindow?.((x: number, y: number, w: number, h: number) => setRect({ x, y, w, h }));
+  };
+  const box = layer?.box;
+  useEffect(() => {
+    if (!rect || !layer) return;
+    layer.mount(id, <Floating rect={rect} onClose={close} />);
+    return () => layer.unmount(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rect, box?.w, box?.h, box?.x, box?.y]);
+  return (
+    <View ref={ref} collapsable={false} style={[{ alignSelf: 'flex-start', flexShrink: 1 }, style]}>
+      <ModelPill onPress={toggle} open={!!rect} style={height ? { height } : undefined} />
+    </View>
+  );
+}

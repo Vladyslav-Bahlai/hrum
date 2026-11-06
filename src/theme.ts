@@ -41,6 +41,15 @@ export const shade = (hex: string, k = 0.955): string => {
   return '#' + c((n >> 16) & 255) + c((n >> 8) & 255) + c(n & 255);
 };
 
+/** Смесь двух цветов: t=0 → a, t=1 → b. */
+export const mix = (a: string, b: string, t: number): string => {
+  const x = parseInt(a.slice(1), 16), y = parseInt(b.slice(1), 16);
+  const c = (sh: number) => Math.round(((x >> sh) & 255) * (1 - t) + ((y >> sh) & 255) * t).toString(16).padStart(2, '0');
+  return '#' + c(16) + c(8) + c(0);
+};
+/** Фон дня: сегодня — светлый и чистый, остальные дни — заметно темнее и «пыльнее», чтобы вчера и завтра нельзя было спутать с сегодня. */
+export const dayPaper = (paper: string, today: boolean): string => (today ? mix(paper, '#FFFFFF', 0.6) : mix(shade(paper, 0.84), '#7C7F7A', 0.14));
+
 export const serif = 'Lora_600SemiBold';
 export const serifReg = 'Lora_400Regular';
 

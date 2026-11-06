@@ -9,7 +9,6 @@ import { emptyChatHint, Messages } from './ChatSlot';
 import { Icon } from '../ui/Icon';
 import { ChatApi } from './useChat';
 const X = TABS.chats;
-const XD = shade(X.accent, 0.72);
 
 /**
  * Чат на весь экран — слой поверх дня (между шапкой и панелью ввода). Ввод — общий нижний инпут панели «+».

@@ -8,6 +8,7 @@ import { useFonts, Lora_400Regular, Lora_600SemiBold, Lora_400Regular_Italic } f
 import { StoreProvider, useStore } from './src/store';
 import { C, T } from './src/theme';
 import { ToastProvider } from './src/ui/Toast';
+import { LayerRoot } from './src/ui/Layer';
 import { Btn, IconBtn } from './src/ui/kit';
 import { DayScreen } from './src/screens/DayScreen';
 import { AISection, ProfileSection } from './src/screens/SettingsScreen';
@@ -20,7 +21,7 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar style="dark" />
       <StoreProvider>
-        {fonts ? <Root /> : <Splash />}
+        <LayerRoot>{fonts ? <Root /> : <Splash />}</LayerRoot>
       </StoreProvider>
       {intro ? <Intro onDone={() => setIntro(false)} /> : null}
     </SafeAreaProvider>

@@ -8,7 +8,12 @@ export const fromKey = (k: string) => {
   const [y, m, d] = k.split('-').map(Number);
   return new Date(y, m - 1, d);
 };
-export const todayKey = () => toKey(new Date());
+/** Во сколько «кончается» день (настройка, часы): запись в 00:30 при значении 4 ещё относится к вчерашнему дню. */
+let dayStartH = 4;
+export const setDayStart = (h?: number) => { dayStartH = typeof h === 'number' && h >= 0 && h <= 11 ? Math.floor(h) : 4; };
+export const getDayStart = () => dayStartH;
+export const dayKeyAt = (ts: number | Date = Date.now(), startH = dayStartH) => toKey(new Date((typeof ts === 'number' ? ts : ts.getTime()) - startH * 3600000));
+export const todayKey = () => dayKeyAt(Date.now());
 export const addDays = (k: string, n: number) => {
   const d = fromKey(k);
   d.setDate(d.getDate() + n);
@@ -227,6 +232,13 @@ export const timestampAt = (dateKey: string, minutes: number) => {
   const [y, m, d] = dateKey.split('-').map(Number);
   return new Date(y, m - 1, d, Math.floor(minutes / 60), minutes % 60).getTime();
 };
+
+/**
+ * Метка времени для записи дня `dateKey`: часы до начала нового дня (по настройке) принадлежат ЭТОМУ дню, но идут после вечера —
+ * запись в 00:30 попадает в конец вчерашнего дня, а не становится первой в сегодняшнем.
+ */
+export const logicalAt = (dateKey: string, minutes: number, startH = dayStartH) =>
+  timestampAt(dateKey, minutes < startH * 60 ? minutes + 1440 : minutes);
 
 /** «1930» → «19:30», «9» → «9», «093» → «09:3»: подстановка двоеточия при вводе цифр. */
 export const formatTimeInput = (raw: string) => {
